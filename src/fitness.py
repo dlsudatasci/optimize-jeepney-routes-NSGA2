@@ -16,19 +16,19 @@ def fitness_score(road_snapped_network_graph, weights, total_potential_transport
         min_transpo_stops_per_route=MIN_TRANSPO_STOPS_PER_ROUTE
     )
 
-    weighted_internal_connectivity = weight_internal_connectivity * internal_connectivity
-    weighted_external_connectivity = weight_external_connectivity * external_connectivity
+    weighted_internal_connectivity = weights["w_int"] * internal_connectivity
+    weighted_external_connectivity = weights["w_ext"] * external_connectivity
 
     network_coverage = get_network_coverage(road_snapped_network_graph)
-    weighted_network_coverage = weight_coverage * network_coverage
+    weighted_network_coverage = weights["w_cov"] * network_coverage
 
     vul, q_c_vul = compute_vulnerability(road_snapped_network_graph)
     vulnerability = normalize_vul_rob(vul, q_c_vul)
-    weighted_vulnerability = weight_vulnerability * vulnerability
+    weighted_vulnerability = weights["w_vul"] * vulnerability
 
     rob, q_c_rob = compute_robustness(road_snapped_network_graph)
     robustness = normalize_vul_rob(rob, q_c_rob)
-    weighted_robustness = weight_robustness * robustness
+    weighted_robustness = weights["w_rob"] * robustness
 
     data = {
         "Coverage": weighted_network_coverage,
@@ -65,11 +65,11 @@ def fitness_score(road_snapped_network_graph, weights, total_potential_transport
     }
 
     total_weight = (
-        weight_coverage
-        + weight_internal_connectivity
-        + weight_external_connectivity
-        + weight_vulnerability
-        + weight_robustness
+        weights["w_cov"]
+        + weights["w_int"]
+        + weights["w_ext"]
+        + weights["w_vul"]
+        + weights["w_rob"]
     )
 
     weighted_sum = (
@@ -279,7 +279,7 @@ def get_network_coverage(network_graph):
                     continue
 
                 if (prev_stop, stop) not in path_seen:
-                    if ALLOWED_EDGE.get((prev_stop, stop), False):
+                    if ALLOWED_EDGE.get((prev_stop, stop), False): # FIXME: Havent defined ALLOWED_EDGE, EDGE_LEN, and TOTAL_NETWORK_ROAD_DISTANCE yet.
                         travelled_distance += EDGE_LEN[(prev_stop, stop)]
                     path_seen.add((prev_stop, stop))
 

@@ -27,23 +27,21 @@ class stopCandidate:
         return self.degree
 
 class Generation:
-    def __init__(self, networks, conn_type, total_road_distance, walking_distance):
+    def __init__(self, networks: list[Network], conn_type: str, total_road_distance, walking_distance):
         self.networks = networks
         self.conn_type = conn_type
         self.total_road_distance = total_road_distance
         self.walking_distance = walking_distance
 
 class Network:
-    def __init__(self, routes, reversed_routes, stops, reversed_stops, graph, walk_distance, total_road_distance):
+    def __init__(self, routes: list[Route], reversed_routes, stops, reversed_stops, graph):
         self.routes = routes
-        self.reversed_routes = reversed_routes
         self.stops = stops
+        self.graph = graph
+        self.reversed_routes = reversed_routes
         self.reversed_stops = reversed_stops
         self.fitness_score = 0
-        self.graph = graph
-        self.walk_distance = walk_distance
-        self.total_road_distance = total_road_distance
-        self.fitness_score_components = {}
+        self.fitness_score_components = {} # Individual components for fitness
 
 class Route:
     def __init__(self, route, route_id, length):

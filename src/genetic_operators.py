@@ -2,7 +2,7 @@ import networkx as nx
 from geopy.distance import geodesic
 import copy, random
 
-from schema import networkObj, Route
+from schema import Network, Route
 from config import MAX_DISTANCE
 from reverse_routes import get_reverse_route
 from utils.route_utils import add_stops_to_list
@@ -66,14 +66,14 @@ def crossover(network1, network2):
         test_reversed_routes_net1 = [copy.deepcopy(r) for r in network1.reversed_routes]
         test_stops_net1 = [copy.deepcopy(s) for s in network1.stops]
         test_reversed_stops_net1 = [copy.deepcopy(s) for s in network1.reversed_stops]
-        child1 = networkObj(test_routes_net1, test_reversed_routes_net1, test_stops_net1, test_reversed_stops_net1, test_graph_net1, network1.conn_type, network1.walk_distance)
+        child1 = Network(test_routes_net1, test_reversed_routes_net1, test_stops_net1, test_reversed_stops_net1, test_graph_net1, network1.conn_type, network1.walk_distance)
 
         test_graph_net2 = network2.graph.copy()
         test_routes_net2 = [copy.deepcopy(r) for r in network2.routes]
         test_reversed_routes_net2 = [copy.deepcopy(r) for r in network2.reversed_routes]
         test_stops_net2 = [copy.deepcopy(s) for s in network2.stops]
         test_reversed_stops_net2 = [copy.deepcopy(s) for s in network2.reversed_stops]
-        child2 = networkObj(test_routes_net2, test_reversed_routes_net2, test_stops_net2, test_reversed_stops_net2, test_graph_net2, network2.conn_type, network2.walk_distance)
+        child2 = Network(test_routes_net2, test_reversed_routes_net2, test_stops_net2, test_reversed_stops_net2, test_graph_net2, network2.conn_type, network2.walk_distance)
 
         #print("THERE ARE NO DIFFERENT ROUTES")
         is_different = False
@@ -225,8 +225,8 @@ def crossover(network1, network2):
 
             count += 1
 
-        child1 = networkObj(route_network1, reversed_route_network1, used_stops1, reversed_used_stops1, route_graph1, conn_type1, walk_type1)
-        child2 = networkObj(route_network2, reversed_route_network2, used_stops2, reversed_used_stops2, route_graph2, conn_type2, walk_type2)
+        child1 = Network(route_network1, reversed_route_network1, used_stops1, reversed_used_stops1, route_graph1, conn_type1, walk_type1)
+        child2 = Network(route_network2, reversed_route_network2, used_stops2, reversed_used_stops2, route_graph2, conn_type2, walk_type2)
 
         #print("ALL ROUTES ARE DIFFERENT")
         is_different = True
@@ -400,8 +400,8 @@ def crossover(network1, network2):
                 reversed_route_network2.append(None)
             count += 1
 
-        child1 = networkObj(route_network1, reversed_route_network1, used_stops1, reversed_used_stops1, route_graph1, conn_type1, walk_type1)
-        child2 = networkObj(route_network2, reversed_route_network2, used_stops2, reversed_used_stops2, route_graph2, conn_type2, walk_type2)
+        child1 = Network(route_network1, reversed_route_network1, used_stops1, reversed_used_stops1, route_graph1, conn_type1, walk_type1)
+        child2 = Network(route_network2, reversed_route_network2, used_stops2, reversed_used_stops2, route_graph2, conn_type2, walk_type2)
 
         #print("SOME ROUTES ARE DIFFERENT")
         is_different = True
