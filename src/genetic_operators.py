@@ -460,15 +460,25 @@ def mutate(network_to_mutate, graph_of_stops, list_of_stops):
     random_route = random_route_obj.route
     random_route_id = random_route_obj.route_id
 
+    # One connection means the route is just its two terminal stops, which are
+    # fixed, so there is no interior stop to swap
+    if len(random_route) < 2:
+        return
+
     # Randomly select a stop in the route
-    index_array = list(range(1, len(random_route)-1))
+    index_array = list(range(1, len(random_route)))
     connection_index = random.choice(index_array)
     random_node_connection = random_route[connection_index]
 
     # Walking Distance
     set_walk_distance = network_to_mutate.walk_distance
 
-    connection_stop_index = random.choice([0, -1]) # Choose whether the origin or destination node
+    # The destination end needs a following connection, so the last connection
+    # can only be swapped at its origin end.
+    if connection_index == len(random_route) - 1:
+        connection_stop_index = 0
+    else:
+        connection_stop_index = random.choice([0, -1]) # Choose whether the origin or destination node
     random_stop = random_node_connection[connection_stop_index] # The random stop to be swapped
 
     # Get the old total distance
@@ -544,7 +554,10 @@ def mutate(network_to_mutate, graph_of_stops, list_of_stops):
             for i in range(len(shortest_route1)-1):
                 node_data = graph_of_stops.nodes[shortest_route1[i]]
                 next_node_data = graph_of_stops.nodes[shortest_route1[i+1]]
-                distance_travelled1 += geodesic(node_data['y'], node_data['x'], next_node_data['y'], next_node_data['x']) # TODO: Double check this was not double checked yet since baka mali yung type
+                distance_travelled1 += geodesic(
+                    (node_data['y'], node_data['x']),
+                    (next_node_data['y'], next_node_data['x'])
+                ).kilometers
 
             # DISTANCE 2: Get the total distance from point A to point B
             shortest_route2 = nx.shortest_path(graph_of_stops, new_random_stop, node2, weight='length')
@@ -552,7 +565,10 @@ def mutate(network_to_mutate, graph_of_stops, list_of_stops):
             for i in range(len(shortest_route2)-1):
                 node_data = graph_of_stops.nodes[shortest_route2[i]]
                 next_node_data = graph_of_stops.nodes[shortest_route2[i+1]]
-                distance_travelled2 += geodesic(node_data['y'], node_data['x'], next_node_data['y'], next_node_data['x']) # TODO: Double check this was not double checked yet since baka mali yung type
+                distance_travelled2 += geodesic(
+                    (node_data['y'], node_data['x']),
+                    (next_node_data['y'], next_node_data['x'])
+                ).kilometers
 
             newDistance = subset_distance + distance_travelled1 + distance_travelled2
             # If its within the 15km distance, then this new stop can be used

@@ -57,7 +57,10 @@ def get_reverse_route(route, graph_of_stops, overall_graph, max_walking_distance
         for i in range(len(reverse_route)-1):
             node_data = graph_of_stops.nodes[reverse_route[i]]
             next_node_data = graph_of_stops.nodes[reverse_route[i+1]]
-            distance_travelled += geodesic(node_data['y'], node_data['x'], next_node_data['y'], next_node_data['x'])
+            distance_travelled += geodesic(
+                (node_data['y'], node_data['x']),
+                (next_node_data['y'], next_node_data['x'])
+            ).kilometers
 
         # Finally, Add the edge
         if reverse_route[0] not in overall_graph:
@@ -72,7 +75,10 @@ def get_reverse_route(route, graph_of_stops, overall_graph, max_walking_distance
     return Route(reverse_route_list, reverse_route_id, totalDistance)
 
 # Checking the edges -> This is to see if the stop is in a one-way route
-def get_opposite_side_stop(node, graph_of_stops, partner_edges):
+def get_opposite_side_stop(node, graph_of_stops, partner_edges=None):
+    # TODO: partner_edges comes from the notebook right now, graph_of_stops contains it
+    if partner_edges is None:
+        partner_edges = graph_of_stops.graph.get('partner_edges', {})
 
     out_edges = list(graph_of_stops.out_edges(node, keys=True, data=True))
     if not out_edges:
