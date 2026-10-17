@@ -1,7 +1,7 @@
 import networkx as nx
 import random
 
-from config import TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE
+from config.config import TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE
 
 def fitness_score(road_snapped_network_graph, weights, total_potential_transport_nodes):
     internal_connectivity, internal_details = compute_internal_connectivity(

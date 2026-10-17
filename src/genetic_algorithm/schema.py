@@ -1,4 +1,4 @@
-class stopCandidate:
+class StopCandidate:
     def __init__(self, lat, long, isTranspo, id, area):
         self.lat = lat
         self.long = long

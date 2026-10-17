@@ -1,7 +1,7 @@
 import networkx as nx
 from geopy.distance import geodesic
 
-from schema import Route
+from genetic_algorithm.schema import Route
 
 # Iterate through each node in reverse and get the shortest path
 
