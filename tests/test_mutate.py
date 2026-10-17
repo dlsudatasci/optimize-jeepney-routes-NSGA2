@@ -27,10 +27,10 @@ import copy
 import networkx as nx
 import pytest
 
-import genetic_operators
-from config import MAX_DISTANCE
-from genetic_operators import mutate
-from schema import Network, Route
+import genetic_algorithm.genetic_operators as genetic_operators
+from config.config import MAX_DISTANCE
+from genetic_algorithm.genetic_operators import mutate
+from genetic_algorithm.schema import Network, Route
 
 # Stops on a north-south line about 1.11 km apart, plus candidates off it.
 # The distances that decide the gates, by geodesic:
