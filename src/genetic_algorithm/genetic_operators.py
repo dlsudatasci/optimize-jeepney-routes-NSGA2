@@ -2,9 +2,9 @@ import networkx as nx
 from geopy.distance import geodesic
 import copy, random
 
-from schema import Network, Route
-from config import MAX_DISTANCE
-from reverse_routes import get_reverse_route
+from genetic_algorithm.schema import Network, Route
+from config.config import MAX_DISTANCE
+from genetic_algorithm.reverse_routes import get_reverse_route
 from utils.route_utils import add_stops_to_list
 
 # V2 - Crossover routes should not have the same routes

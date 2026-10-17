@@ -30,3 +30,8 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+packages = [
+    "src/config",
+    "src/utils",
+    "src/genetic_algorithm",
+]
