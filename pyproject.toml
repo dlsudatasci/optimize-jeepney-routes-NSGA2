@@ -10,6 +10,7 @@ dependencies = [
     "ipykernel>=7.4.0",
     "matplotlib>=3.11.2",
     "networkx>=3.7",
+    "notebook>=7.6.3",
     "osmnx>=2.1.1",
     "pandas>=3.0.6",
     "rtree>=1.4.1",

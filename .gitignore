@@ -6,7 +6,6 @@
 # *.html
 # *.json
 
-
 # GA backups
 # GA Backup Files/
 
@@ -230,3 +229,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+.aider*

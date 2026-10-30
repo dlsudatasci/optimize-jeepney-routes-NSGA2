@@ -260,7 +260,7 @@ def compute_robustness(network_graph):
     R_prime = sum(s_values) / N
     return R_prime, q_c
 
-def get_network_coverage(network_graph):
+def get_network_coverage(network_graph, total_network_distance: int):
     travelled_distance = 0
     # This will contain all the edges travelled
     edge_seen = set()
@@ -279,14 +279,14 @@ def get_network_coverage(network_graph):
                     continue
 
                 if (prev_stop, stop) not in path_seen:
-                    if ALLOWED_EDGE.get((prev_stop, stop), False): # FIXME: Havent defined ALLOWED_EDGE, EDGE_LEN, and TOTAL_NETWORK_ROAD_DISTANCE yet.
+                    if ALLOWED_EDGE.get((prev_stop, stop), False): # FIXME: Havent defined ALLOWED_EDGE and EDGE_LEN yet.
                         travelled_distance += EDGE_LEN[(prev_stop, stop)]
                     path_seen.add((prev_stop, stop))
 
                 prev_stop = stop
 
-    # print(travelled_distance, '/', TOTAL_NETWORK_ROAD_DISTANCE, '=', travelled_distance / TOTAL_NETWORK_ROAD_DISTANCE)
-    return travelled_distance / TOTAL_NETWORK_ROAD_DISTANCE
+    # print(travelled_distance, '/', total_network_distance, '=', travelled_distance / total_network_distance)
+    return travelled_distance / total_network_distance
 
 def largest_weakly_connected_component_size(G):
     if len(G) == 0:
