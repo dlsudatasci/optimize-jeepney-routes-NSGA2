@@ -1,7 +1,7 @@
 import networkx as nx
 import random
 
-from config.config import TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE
+from config.config import TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE, STOP_COST, STOP_SIZES, MAX_BUDGET, MAX_DEGREE
 
 def fitness_score(road_snapped_network_graph, weights, total_potential_transport_nodes):
     internal_connectivity, internal_details = compute_internal_connectivity(
@@ -83,6 +83,35 @@ def fitness_score(road_snapped_network_graph, weights, total_potential_transport
     fitness_score = 0.0 if total_weight <= 0 else weighted_sum / total_weight
 
     return fitness_score, data
+
+# stop costs based off singapore minimum size (9m x 3m) with length multiplied by factor of 1x, 1.5x, 2x
+# price is computed based off dotr figures (28k per sqm)
+def compute_capex_cost(
+    network: nx.MultiDiGraph, 
+    stop_cost: int = STOP_COST,
+    stop_sizes: list[float] = STOP_SIZES, 
+    max_degree: list[int] = MAX_DEGREE,
+    max_budget: int = MAX_BUDGET
+):
+    area = 0.0
+    for stop in network.nodes():
+        if network.degree(stop) < 1:
+            continue
+        area += get_stop_area(network, stop, stop_sizes, max_degree)
+
+    capex_cost = area * stop_cost
+
+    violation = max(0, capex_cost - max_budget)
+    return capex_cost, violation
+
+# map stop size by number of degrees, return size of stop based on its stop class
+def get_stop_area(network, stop, stop_sizes, max_degree):
+    degree = network.degree(stop)
+    for stop_class in range(0, 3):
+        upper = max_degree[stop_class]
+        if degree <= upper:
+            return stop_sizes[stop_class]
+    return stop_sizes[2]
 
 def compute_internal_connectivity(
     network,
