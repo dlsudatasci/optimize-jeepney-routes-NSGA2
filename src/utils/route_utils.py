@@ -3,6 +3,8 @@ import numpy as np
 import math
 from scipy.spatial.distance import euclidean
 
+from genetic_algorithm.schema import Stop
+
 def add_stops_to_list(routes):
     used_stops = []
     for route in routes:
@@ -22,10 +24,10 @@ def add_points_to_graph(graph, graph_to_add):
             graph_to_add.add_node(node_key, geometry=node_data['geometry'], name=node_data['name'], y=node_data['lat'], amenity=node_data['amenity'],
                                 x=node_data['lon'])
 
-def get_enabled_node_with_highest_edge_probability(source_node, enabled_nodes, connection_type, city_area_sum, network_graph):
+def get_enabled_node_with_highest_edge_probability(source_node: Stop, enabled_nodes: list[Stop],  city_area_sum: float, network_graph):
     prob_list = []
     for n in enabled_nodes:
-        edge_prob = get_edge_probability(source_node, n, len(enabled_nodes), connection_type, city_area_sum, network_graph)
+        edge_prob = get_edge_probability(source_node, n, len(enabled_nodes), city_area_sum, network_graph)
         prob_list.append(edge_prob)
 
     min_score = min(prob_list)
@@ -39,9 +41,9 @@ def get_enabled_node_with_highest_edge_probability(source_node, enabled_nodes, c
     return chosen_node
 
 # Probabilities of candidate nodes based on distance, area, node degree, and if transpo stop
-def get_edge_probability(source, destination, normalization_factor, connection_type, city_area_sum, network_graph):
-    source_coord = [source.getLat(), source.getLong()]
-    dest_coord = [destination.getLat(), destination.getLong()]
+def get_edge_probability(source: Stop, destination: Stop, normalization_factor, city_area_sum: float, network_graph):
+    source_coord = [source.lat, source.long]
+    dest_coord = [destination.lat, destination.long]
 
     base_prob = math.exp(-(euclidean(source_coord, dest_coord))) / float(normalization_factor)
 
@@ -49,33 +51,28 @@ def get_edge_probability(source, destination, normalization_factor, connection_t
     if network_graph.has_edge(source.id, destination.id):
         base_prob *= 0.5 # The penalty
 
-    if connection_type == "Default":
-        if destination.isTranspo:
-            return base_prob * 1.5
-        return base_prob
-    elif connection_type == "Area":
-        if destination.isTranspo:
-            return base_prob * 1.5
-        return base_prob * (1 + (destination.getArea() / city_area_sum))
-    elif connection_type == "Degree":
-        if destination.isTranspo:
-            return base_prob * 1.5 * (1 + (destination.getDegree() / 10))
-        return base_prob * (1 + (destination.getDegree() / 10))
+    if destination.isTranspo:
+        return base_prob * 1.5
+
+    area_mult = 1 + (destination.area / city_area_sum)
+    degree_mult = 1 + (destination.degree / 10)
+
+    return base_prob * area_mult * degree_mult
 
 # Disables the surrounding nodes within the distance of source
-def disable_surrounding_nodes(nodes, source_node, max_distance):
+def disable_surrounding_nodes(nodes: list[Stop], source_node: Stop, max_distance: int):
     max_radius = 2000 # This is max radius in which all nodes outside will be disabled
-    s_lat = source_node.getLat()
-    s_lon = source_node.getLong()
+    s_lat = source_node.lat
+    s_lon = source_node.long
 
     for node in nodes:
-        n_lat = node.getLat()
-        n_lon = node.getLong()
+        n_lat = node.lat
+        n_lon = node.long
         distance_to_source = geodesic((s_lat, s_lon), (n_lat, n_lon)).meters
         if distance_to_source <= max_distance or distance_to_source > max_radius:
             node.disable()
 
-def enable_nodes(nodes):
+def enable_nodes(nodes: list[Stop]):
     for node in nodes:
         node.enable()
 

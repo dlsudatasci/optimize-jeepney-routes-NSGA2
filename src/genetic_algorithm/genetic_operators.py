@@ -7,10 +7,126 @@ from config.config import MAX_DISTANCE
 from genetic_algorithm.reverse_routes import get_reverse_route
 from utils.route_utils import add_stops_to_list
 
-# V2 - Crossover routes should not have the same routes
-# CROSSOVER SPLIT INDEX FUNCTION
+def calc_jaccard_sim(route1: Route, route2: Route) -> float:
+    edges1 = set(standardize_route(route1.route))
+    edges2 = set(standardize_route(route2.route))
 
-def crossover(network1, network2):
+    if not edges1 or not edges2:
+        return 0.0
+
+    intersection = edges1.intersection(edges2)
+    union = edges1.union(edges2)
+    return len(intersection) / len(union)
+
+def group_into_lines(routes: list[Route]):
+    lines = {}
+    for route in routes:
+        if route.line_id not in lines:
+            lines[route.line_id] = []
+        lines[route.line_id].append(route)
+    return list(lines.values())
+
+# sim threshold determines how much of the edges have to be the same to determine if it is to be repaired
+def repair_chromosome(child_lines: list[list], spare_pool: list[list], similarity_threshold: float = 1.0):
+    repaired_lines = []
+    seen_standardized = []
+
+    random.shuffle(spare_pool) # Shuffle to ensure stochasticity
+
+    for line in child_lines:
+        fwd_route = next((r for r in line if r.direction.lower() == "forward"), line[0])
+        std_route = standardize_route(fwd_route.route)
+
+        # Check against already accepted routes for exact matches
+        is_invalid = std_route in seen_standardized
+
+        if not is_invalid:
+            for accepted_std in seen_standardized:
+                # Reconstruct dummy routes for the similarity function
+                dummy_r1, dummy_r2 = Route(list(std_route), "", 0, 0, ""), Route(list(accepted_std), "", 0, 0, "")
+
+                if calc_jaccard_sim(dummy_r1, dummy_r2) >= similarity_threshold:
+                    is_invalid = True
+                    break
+
+        if is_invalid:
+            # If route is invalid (aka similar to another) it is to be repaired.
+            while spare_pool:
+                spare_line = spare_pool.pop(0)
+                spare_fwd = next((r for r in spare_line if r.direction.lower() == "forward"), spare_line[0])
+                spare_std = standardize_route(spare_fwd.route)
+
+                if spare_std not in seen_standardized:
+                    repaired_lines.append(copy.deepcopy(spare_line))
+                    seen_standardized.append(spare_std)
+                    break
+            # Note: If spare_pool runs out, the duplicate is simply dropped,
+
+        else:
+            repaired_lines.append(copy.deepcopy(line))
+            seen_standardized.append(std_route)
+
+    return repaired_lines
+
+# V3 - Crossover with post-op repair
+def crossover(network1: Network, network2: Network):
+    lines1 = group_into_lines(network1.routes)
+    lines2 = group_into_lines(network2.routes)
+
+    min_length = min(len(lines1), len(lines2))
+
+    if min_length <= 1:
+        return copy.deepcopy(network1), copy.deepcopy(network2), False
+
+    split_idx = random.randint(1, min_length - 1)
+
+    child1_raw = lines1.routes[:split_idx] + lines2.routes[split_idx:]
+    child2_raw = lines2.routes[:split_idx] + lines1.routes[split_idx:]
+
+    child1_spare = lines1.routes[split_idx:] + lines2.routes[:split_idx]
+    child2_spare = lines2.routes[split_idx:] + lines1.routes[:split_idx]
+
+    child1_repaired = repair_chromosome(child1_raw, child1_spare)
+    child2_repaired = repair_chromosome(child2_raw, child2_spare)
+
+    def build_network_from_routes(lines: list[list[Route]], parent_graphs: tuple[nx.MultiDiGraph, nx.MultiDiGraph]):
+        child_graph = nx.MultiDiGraph()
+        child_stops = set()
+        final_routes = []
+
+        for line_id, line in enumerate(lines):
+            for route in line:
+                old_route_id = route.route_id
+                route.line_id = line_id
+                route.route_id = f"{line_id}-{route.direction[:1].upper()}"
+
+                src_graph = parent_graphs[0] if route in network1.routes else parent_graphs[1]
+
+                new_route = Route([copy.deepcopy(r) for r in route.route], route.route_id, route.length)
+
+                for u, v in route.route:
+                    # Add nodes and track used stops
+                    child_graph.add_node(u, **src_graph.nodes[u])
+                    child_graph.add_node(v, **src_graph.nodes[v])
+                    child_stops.add(u)
+                    child_stops.add(v)
+
+                    # Add edge with parent data
+                    edge_data = src_graph.get_edge_data(u, v, key=old_route_id)
+                    if edge_data:
+                        child_graph.add_edge(u, v, key=route.route_id, **edge_data)
+
+                final_routes.append(new_route)
+
+        return Network(final_routes, list(child_stops), child_graph)
+
+    child1 = build_network_from_routes(child1_repaired, (network1.graph, network2.graph))
+    child2 = build_network_from_routes(child2_repaired, (network1.graph, network2.graph))
+
+    return child1, child2, True
+
+# V2 - Crossover routes should not have the same routes
+def _crossover(network1, network2):
     # Split both networks based on which routes do not have the same connections
     # network.routes is a list of routes or list of lists of shortest_path
     routes_same1 = []
