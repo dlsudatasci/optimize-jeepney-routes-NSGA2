@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import random, os
 import pickle
@@ -33,14 +35,14 @@ def save_ga_checkpoint(
         "python_random_state": random.getstate(),
         "numpy_random_state": np.random.get_state(),
     }
-    export_networks(data, ga_checkpoint_filename(run_tag))
+    save_data(data, ga_checkpoint_filename(run_tag))
 
 def load_ga_checkpoint(run_tag=""):
     filename = ga_checkpoint_filename(run_tag)
     if not os.path.exists(filename):
         return None
     try:
-        return import_networks(filename)
+        return load_data(filename)
     except (EOFError, pickle.UnpicklingError):
         print(f"Warning: checkpoint file is corrupted or incomplete: {filename}")
         return None
@@ -54,31 +56,19 @@ def delete_ga_checkpoint(run_tag=""):
     if os.path.exists(best_population_file):
         os.remove(best_population_file)
 
-# Import and Export networks or graphs to pickle
-def export_networks(networks, path):
-    dir_ = os.path.dirname(path)
-    if dir_:
-        os.makedirs(dir_, exist_ok=True)
+def save_data(data, path):
+    filepath = Path(path)
+    filepath.parent.mkdir(parents=True, exist_ok=True)
 
-    temp_path = path + ".tmp"
-
+    # Safe atomic save
+    temp_path = filepath.with_suffix(filepath.suffix + '.tmp')
     with open(temp_path, 'wb') as f:
-        pickle.dump(networks, f)
-        f.flush()
-        os.fsync(f.fileno())
+        pickle.dump(data, f)
+    temp_path.replace(filepath)
 
-    if not os.path.exists(temp_path):
-        raise FileNotFoundError(f"Temporary checkpoint file was not created: {temp_path}")
-
-    if os.path.exists(path):
-        os.remove(path)
-
-    os.rename(temp_path, path)
-
-def import_networks(path):
+def load_data(path):
     with open(path, 'rb') as f:
-        routes = pickle.load(f)
-    return routes
+        return pickle.load(f)
 
 # Export most recent population into pikl in case of errors
 def save_recent_population(population_num, population, run_tag=""):
@@ -88,7 +78,7 @@ def save_recent_population(population_num, population, run_tag=""):
         "population_num": population_num,
     }
 
-    export_networks(data, filename)
+    save_data(data, filename)
 
 
 # Export current best population into pikl in case of errors
@@ -99,7 +89,7 @@ def save_recent_best_population(population_num, population, run_tag=""):
         "population_num": population_num,
     }
 
-    export_networks(data, filename)
+    save_data(data, filename)
 
 # Export current best population into pikl in case of errors
 def save_max_score_list(population_num, max_list, run_tag=""):
@@ -109,7 +99,7 @@ def save_max_score_list(population_num, max_list, run_tag=""):
         "population_num": population_num,
     }
 
-    export_networks(data, filename)
+    save_data(data, filename)
 
 def _pct_tag(w):
     """
