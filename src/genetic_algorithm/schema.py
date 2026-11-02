@@ -20,7 +20,7 @@ class Route:
         self.route_id = route_id
         self.length = length
         self.line_id = line_id
-        self.direction = direction
+        self.direction = direction # could only be "forward" or "reverse"
 
 class Network:
     def __init__(self, routes: list[Route], stops, graph):
