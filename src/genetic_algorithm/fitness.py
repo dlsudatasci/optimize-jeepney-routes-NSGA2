@@ -1,9 +1,9 @@
 import networkx as nx
 import random
 
-from config.config import TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE
+from config.config import TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE, STOP_COST, STOP_SIZES, MAX_BUDGET, MAX_DEGREE
 
-def fitness_score(road_snapped_network_graph, weights, total_potential_transport_nodes):
+def fitness_score(road_snapped_network_graph, weights, total_potential_transport_nodes, allowed_edge, edge_len):
     internal_connectivity, internal_details = compute_internal_connectivity(
         road_snapped_network_graph,
         target_node_ratio=TARGET_NODE_RATIO,
@@ -19,7 +19,7 @@ def fitness_score(road_snapped_network_graph, weights, total_potential_transport
     weighted_internal_connectivity = weights["w_int"] * internal_connectivity
     weighted_external_connectivity = weights["w_ext"] * external_connectivity
 
-    network_coverage = get_network_coverage(road_snapped_network_graph)
+    network_coverage = get_network_coverage(road_snapped_network_graph, allowed_edge, edge_len)
     weighted_network_coverage = weights["w_cov"] * network_coverage
 
     vul, q_c_vul = compute_vulnerability(road_snapped_network_graph)
@@ -83,6 +83,35 @@ def fitness_score(road_snapped_network_graph, weights, total_potential_transport
     fitness_score = 0.0 if total_weight <= 0 else weighted_sum / total_weight
 
     return fitness_score, data
+
+# stop costs based off singapore minimum size (9m x 3m) with length multiplied by factor of 1x, 1.5x, 2x
+# price is computed based off dotr figures (28k per sqm)
+def compute_capex_cost(
+    network: nx.MultiDiGraph, 
+    stop_cost: int = STOP_COST,
+    stop_sizes: list[float] = STOP_SIZES, 
+    max_degree: list[int] = MAX_DEGREE,
+    max_budget: int = MAX_BUDGET
+):
+    area = 0.0
+    for stop in network.nodes():
+        if network.degree(stop) < 1:
+            continue
+        area += get_stop_area(network, stop, stop_sizes, max_degree)
+
+    capex_cost = area * stop_cost
+
+    violation = max(0, capex_cost - max_budget)
+    return capex_cost, violation
+
+# map stop size by number of degrees, return size of stop based on its stop class
+def get_stop_area(network, stop, stop_sizes, max_degree):
+    degree = network.degree(stop)
+    for stop_class in range(0, 3):
+        upper = max_degree[stop_class]
+        if degree <= upper:
+            return stop_sizes[stop_class]
+    return stop_sizes[2]
 
 def compute_internal_connectivity(
     network,
@@ -260,7 +289,33 @@ def compute_robustness(network_graph):
     R_prime = sum(s_values) / N
     return R_prime, q_c
 
-def get_network_coverage(network_graph, total_network_distance: int):
+# Red(R) = sum of L(a) for a in A_multi / sum of L(a) for a in A_serviced
+# NOTE: test if working
+def compute_redundancy(network, edge_len) -> float:
+    arcs = {} # length
+    routes_on = {} # route ids
+
+    for (_, _, key, data) in network.edges(keys=True, data=True):
+        prev = None
+        for stop in data['road_path']:
+            if prev is None:
+                prev = stop
+                continue
+            arc = (prev, stop)
+            length = edge_len.get(arc)
+            if length is not None:
+                arcs[arc] = length
+                routes_on.setdefault(arc, set()).add(key)
+            prev = stop
+
+    serviced = sum(arcs.values())
+    if serviced <= 0:
+        return 0.0
+    multi = sum(length for arc, length in arcs.items() if len(routes_on[arc]) >= 2)
+    return multi / serviced
+
+# NOTE: check if types are correct
+def get_network_coverage(network_graph, total_network_distance: int, allowed_edge: dict[tuple[int, int], bool], edge_len:  dict[tuple[int, int], float]):
     travelled_distance = 0
     # This will contain all the edges travelled
     edge_seen = set()
@@ -279,8 +334,8 @@ def get_network_coverage(network_graph, total_network_distance: int):
                     continue
 
                 if (prev_stop, stop) not in path_seen:
-                    if ALLOWED_EDGE.get((prev_stop, stop), False): # FIXME: Havent defined ALLOWED_EDGE and EDGE_LEN yet.
-                        travelled_distance += EDGE_LEN[(prev_stop, stop)]
+                    if allowed_edge.get((prev_stop, stop), False):
+                        travelled_distance += edge_len[(prev_stop, stop)]
                     path_seen.add((prev_stop, stop))
 
                 prev_stop = stop
@@ -323,3 +378,8 @@ def get_route_family_stop_map(network):
         route_family_stops[route_family].add(v)
 
     return route_family_stops
+
+def normalize_vul_rob(vul_rob, q_c):
+    # With fixed q_c = 10% removals, max possible R' is q_c
+    # because R' = (1/N) * sum s(q), and each s(q) <= 1.
+    return 0.0 if q_c <= 0 else vul_rob / q_c
