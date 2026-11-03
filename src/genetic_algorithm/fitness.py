@@ -31,6 +31,9 @@ def fitness_network_efficiency(network, weights, total_potential_transport_nodes
     robustness = normalize_vul_rob(rob, q_c_rob)
     weighted_robustness = weights["w_rob"] * robustness
 
+    redundancy = compute_redundancy(network)
+    weighted_redundancy = weights["w_rob"] * redundancy
+
     data = {
         "Coverage": weighted_network_coverage,
         "Internal Connectivity": weighted_internal_connectivity,
@@ -71,6 +74,7 @@ def fitness_network_efficiency(network, weights, total_potential_transport_nodes
         + weights["w_ext"]
         + weights["w_vul"]
         + weights["w_rob"]
+        + weights["w_red"]
     )
 
     weighted_sum = (
@@ -79,6 +83,7 @@ def fitness_network_efficiency(network, weights, total_potential_transport_nodes
         + weighted_external_connectivity
         + weighted_vulnerability
         + weighted_robustness
+        + weighted_redundancy
     )
 
     fitness_score = 0.0 if total_weight <= 0 else weighted_sum / total_weight
