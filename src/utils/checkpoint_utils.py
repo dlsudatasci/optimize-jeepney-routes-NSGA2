@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import shutil
 import numpy as np
 import random, os
 import pickle
@@ -60,11 +61,8 @@ def save_data(data, path):
     filepath = Path(path)
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
-    # Safe atomic save
-    temp_path = filepath.with_suffix(filepath.suffix + '.tmp')
-    with open(temp_path, 'wb') as f:
+    with open(filepath, 'wb') as f:
         pickle.dump(data, f)
-    temp_path.replace(filepath)
 
 def load_data(path):
     with open(path, 'rb') as f:

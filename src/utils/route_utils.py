@@ -48,7 +48,7 @@ def get_edge_probability(source: Stop, destination: Stop, normalization_factor, 
     base_prob = math.exp(-(euclidean(source_coord, dest_coord))) / float(normalization_factor)
 
     # If there is already an existing edge between source and destination, decrease the probability
-    if network_graph.has_edge(source.id, destination.id):
+    if network_graph.has_edge(source.stop_id, destination.stop_id):
         base_prob *= 0.5 # The penalty
 
     if destination.isTranspo:

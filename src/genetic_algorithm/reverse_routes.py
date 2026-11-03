@@ -4,16 +4,17 @@ from geopy.distance import geodesic
 from genetic_algorithm.schema import Route
 
 # Iterate through each node in reverse and get the shortest path
-
-def get_reverse_route(route, graph_of_stops, overall_graph, max_walking_distance):
+def get_reverse_route(route: Route, graph_of_stops, nodes_yx):
     paths = route.route
     reverse_paths = paths[::-1]
     reverse_route_list = []
-    reverse_route_id = route.route_id[:-1] + 'B' # Reverse Route ID
-    totalDistance = 0
+
+    reverse_route_id = f"{route.line_id}-R" # Reverse Route ID
+    total_distance = 0
 
     used_stops = []
     stop_list = []
+
     for connection in reverse_paths:
         reverse_route_path = connection[::-1]
         end_node = reverse_route_path[-1]
@@ -43,36 +44,24 @@ def get_reverse_route(route, graph_of_stops, overall_graph, max_walking_distance
             return None
 
         stop_list.append([start_node, end_node])
-        start_node = end_node # Next connection start node is the end node of the previous connection
+        start_node = end_node # Next start node is previous end node
 
     for connection in stop_list:
-        start_node = connection[0]
-        end_node = connection[-1]
+        start_node, end_node = connection[0], connection[-1]
 
         reverse_route = nx.shortest_path(graph_of_stops, start_node, end_node, weight='length')
         reverse_route_list.append(reverse_route)
 
-        distance_travelled = 0
         # Get the total distance from point A to point B
+        distance_travelled = 0
         for i in range(len(reverse_route)-1):
-            node_data = graph_of_stops.nodes[reverse_route[i]]
-            next_node_data = graph_of_stops.nodes[reverse_route[i+1]]
-            distance_travelled += geodesic(
-                (node_data['y'], node_data['x']),
-                (next_node_data['y'], next_node_data['x'])
-            ).kilometers
+            ay, ax = nodes_yx[reverse_route[i]]
+            by, bx = nodes_yx[reverse_route[i+1]]
+            distance_travelled += geodesic((ay, ax), (by, bx)).kilometers
 
-        # Finally, Add the edge
-        if reverse_route[0] not in overall_graph:
-            overall_graph.add_node(reverse_route[0], **graph_of_stops.nodes[reverse_route[0]])
-        if reverse_route[-1] not in overall_graph:
-            overall_graph.add_node(reverse_route[-1], **graph_of_stops.nodes[reverse_route[-1]])
+        total_distance += distance_travelled
 
-        overall_graph.add_edge(reverse_route[0], reverse_route[-1], key=reverse_route_id, road_path = reverse_route, distance = distance_travelled) # Add edge
-        totalDistance += distance_travelled
-
-    # print("REVERSE ROUTE DISTANCE: ", totalDistance)
-    return Route(reverse_route_list, reverse_route_id, totalDistance)
+    return Route(reverse_route_list, reverse_route_id, total_distance, route.line_id, direction="reverse")
 
 # Checking the edges -> This is to see if the stop is in a one-way route
 def get_opposite_side_stop(node, graph_of_stops, partner_edges=None):
