@@ -1,17 +1,18 @@
 import networkx as nx
 import random
+from genetic_algorithm.schema import Route, Network
 
 from config.config import TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE, STOP_COST, STOP_SIZES, MAX_BUDGET, MAX_DEGREE
 
-def fitness_score(road_snapped_network_graph, weights, total_potential_transport_nodes, allowed_edge, edge_len):
+def fitness_score(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len):
     internal_connectivity, internal_details = compute_internal_connectivity(
-        road_snapped_network_graph,
+        network,
         target_node_ratio=TARGET_NODE_RATIO,
         min_intersections_per_route=MIN_INTERSECTIONS_PER_ROUTE
     )
 
     external_connectivity, external_details = compute_external_connectivity(
-        road_snapped_network_graph,
+        network,
         total_potential_transport_nodes=total_potential_transport_nodes,
         min_transpo_stops_per_route=MIN_TRANSPO_STOPS_PER_ROUTE
     )
@@ -19,7 +20,7 @@ def fitness_score(road_snapped_network_graph, weights, total_potential_transport
     weighted_internal_connectivity = weights["w_int"] * internal_connectivity
     weighted_external_connectivity = weights["w_ext"] * external_connectivity
 
-    network_coverage = get_network_coverage(road_snapped_network_graph, allowed_edge, edge_len)
+    network_coverage = get_network_coverage(road_snapped_network_graph, total_network_distance, allowed_edge, edge_len)
     weighted_network_coverage = weights["w_cov"] * network_coverage
 
     vul, q_c_vul = compute_vulnerability(road_snapped_network_graph)
@@ -87,17 +88,17 @@ def fitness_score(road_snapped_network_graph, weights, total_potential_transport
 # stop costs based off singapore minimum size (9m x 3m) with length multiplied by factor of 1x, 1.5x, 2x
 # price is computed based off dotr figures (28k per sqm)
 def compute_capex_cost(
-    network: nx.MultiDiGraph, 
+    network: Network, 
     stop_cost: int = STOP_COST,
     stop_sizes: list[float] = STOP_SIZES, 
     max_degree: list[int] = MAX_DEGREE,
     max_budget: int = MAX_BUDGET
 ):
     area = 0.0
-    for stop in network.nodes():
-        if network.degree(stop) < 1:
+    for stop in network.graph.nodes():
+        if network.graph.degree(stop) < 1:
             continue
-        area += get_stop_area(network, stop, stop_sizes, max_degree)
+        area += get_stop_area(network.graph, stop, stop_sizes, max_degree)
 
     capex_cost = area * stop_cost
 
@@ -114,11 +115,20 @@ def get_stop_area(network, stop, stop_sizes, max_degree):
     return stop_sizes[2]
 
 def compute_internal_connectivity(
-    network,
+    network: Network,
     target_node_ratio=TARGET_NODE_RATIO,
     min_intersections_per_route=MIN_INTERSECTIONS_PER_ROUTE
 ):
-    total_nodes = len(network.nodes())
+    """   
+        n_i = the number of intersection nodes, aka when 2+ routes stop there in the same direction
+        N_i = nodes * target node ratio, decimals truncated and floor set at 1
+        r_i = the number of routes containing intersection nodes >= intersection threshold
+            passed to this function
+        R_i = the number of routes
+        internal connectivity = 0.5 * [MIN(n_i / N_i, 1.0) + (r_i / R_i IF R_i > 0 ELSE 0.0)]
+    """
+
+    total_nodes = len(network.graph.nodes())
     if total_nodes == 0:
         return 0.0, {
             "n_i": 0,
@@ -128,10 +138,7 @@ def compute_internal_connectivity(
             "min_intersections_per_route": min_intersections_per_route,
         }
 
-    route_family_stops = get_route_family_stop_map(network)
-    total_route_families = len(route_family_stops)
-
-    if total_route_families == 0:
+    if not network.routes:
         return 0.0, {
             "n_i": 0,
             "N_i": max(1, int(total_nodes * target_node_ratio)),
@@ -140,28 +147,40 @@ def compute_internal_connectivity(
             "min_intersections_per_route": min_intersections_per_route,
         }
 
-    # Identify intersection nodes: nodes touched by >1 unique route family
-    node_route_families = {}
-    for route_family, stops in route_family_stops.items():
-        for stop in stops:
-            node_route_families.setdefault(stop, set()).add(route_family)
+    routes_by_direction = {}
+    route_stops = {}
 
-    intersection_nodes = {
-        node for node, families in node_route_families.items()
-        if len(families) > 1
-    }
+    for route in network.routes:
+        stops = set()
+        for connection in route.route:
+            stops.add(connection[0])
+            stops.add(connection[-1])
+        route_stops[route.route_id] = stops
+
+        per_stop = routes_by_direction.setdefault(route.direction, {})
+        for stop in stops:
+            per_stop.setdefault(stop, set()).add(route.route_id)
+
+    intersection_nodes = set()
+    for per_stop in routes_by_direction.values():
+        for stop, route_ids in per_stop.items():
+            if len(route_ids) >= 2:
+                intersection_nodes.add(stop)
 
     n_i = len(intersection_nodes)
     N_i = max(1, int(total_nodes * target_node_ratio))
-
-    # r_i = routes with at least n intersection nodes
     r_i = 0
-    for route_family, stops in route_family_stops.items():
-        intersection_count = sum(1 for stop in stops if stop in intersection_nodes)
-        if intersection_count >= min_intersections_per_route:
+
+    for route in network.routes:
+        per_stop = routes_by_direction[route.direction]
+        interchange_stops = {
+            stop for stop in route_stops[route.route_id]
+            if len(per_stop.get(stop, ())) >= 2
+        }
+        if len(interchange_stops) >= min_intersections_per_route:
             r_i += 1
 
-    R_i = total_route_families
+    R_i = len(network.routes)
 
     internal_connectivity = 0.5 * (
         min(n_i / N_i, 1.0) +
@@ -291,11 +310,11 @@ def compute_robustness(network_graph):
 
 # Red(R) = sum of L(a) for a in A_multi / sum of L(a) for a in A_serviced
 # NOTE: test if working
-def compute_redundancy(network, edge_len) -> float:
+def compute_redundancy(network: Network, edge_len) -> float:
     arcs = {} # length
     routes_on = {} # route ids
 
-    for (_, _, key, data) in network.edges(keys=True, data=True):
+    for (_, _, key, data) in network.graph.edges(keys=True, data=True):
         prev = None
         for stop in data['road_path']:
             if prev is None:
@@ -316,32 +335,50 @@ def compute_redundancy(network, edge_len) -> float:
 
 # NOTE: check if types are correct
 def get_network_coverage(network_graph, total_network_distance: int, allowed_edge: dict[tuple[int, int], bool], edge_len:  dict[tuple[int, int], float]):
-    travelled_distance = 0
     # This will contain all the edges travelled
-    edge_seen = set()
-    path_seen = set()
 
-    for node1, node2, edge_data in network_graph.edges(data=True):
-        if (node1, node2) not in edge_seen and (node2, node1) not in edge_seen:
-            edge_seen.add((node1, node2))
-            edge_seen.add((node2, node1))
-            path_travelled = edge_data['road_path']
-
-            prev_stop = None
-            for stop in path_travelled:
-                if prev_stop == None:
-                    prev_stop = stop
-                    continue
-
-                if (prev_stop, stop) not in path_seen:
-                    if allowed_edge.get((prev_stop, stop), False):
-                        travelled_distance += edge_len[(prev_stop, stop)]
-                    path_seen.add((prev_stop, stop))
-
+    if (total_network_distance == 0): 
+            return 0.0
+    
+    serviced = {}
+    for _, _, edge_data in network_graph.edges(data=True):
+        prev_stop = None
+        for stop in edge_data['road_path']:
+            if prev_stop is None:
                 prev_stop = stop
+                continue
 
+            segment = frozenset((prev_stop, stop))
+            if segment not in serviced and segment in allowed_edge:
+                serviced[segment] = edge_len.get(segment, 0.0)
+
+            prev_stop = stop
+
+    return sum(serviced.values()) / total_network_distance
+    # edge_seen = set()
+    # path_seen = set()
+    # travelled_distance = 0
+    # for node1, node2, edge_data in network_graph.edges(data=True):
+    #     if (node1, node2) not in edge_seen and (node2, node1) not in edge_seen:
+    #         edge_seen.add((node1, node2))
+    #         edge_seen.add((node2, node1))
+    #         path_travelled = edge_data['road_path']
+    #
+    #         prev_stop = None
+    #         for stop in path_travelled:
+    #             if prev_stop == None:
+    #                 prev_stop = stop
+    #                 continue
+    #
+    #             if (prev_stop, stop) not in path_seen:
+    #                 if allowed_edge.get((prev_stop, stop), False):
+    #                     travelled_distance += edge_len[(prev_stop, stop)]
+    #                 path_seen.add((prev_stop, stop))
+    #
+    #             prev_stop = stop
+    #
     # print(travelled_distance, '/', total_network_distance, '=', travelled_distance / total_network_distance)
-    return travelled_distance / total_network_distance
+    # return travelled_distance / total_network_distance
 
 def largest_weakly_connected_component_size(G):
     if len(G) == 0:
