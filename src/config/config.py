@@ -14,8 +14,9 @@ MAX_BUDGET = 200000000 # placeholder, modify based on city
 
 FITNESS_WEIGHTS = {
     "w_cov": 0.20,
-    "w_int": 0.20,
-    "w_ext": 0.20,
+    "w_int": 0.10,
+    "w_ext": 0.10,
     "w_vul": 0.20,
     "w_rob": 0.20,
+    "w_red": 0.20,
 }

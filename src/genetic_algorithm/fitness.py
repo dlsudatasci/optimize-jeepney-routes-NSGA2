@@ -4,7 +4,7 @@ from genetic_algorithm.schema import Route, Network
 
 from config.config import TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE, STOP_COST, STOP_SIZES, MAX_BUDGET, MAX_DEGREE
 
-def fitness_score(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len):
+def fitness_network_efficiency(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len):
     internal_connectivity, internal_details = compute_internal_connectivity(
         network,
         target_node_ratio=TARGET_NODE_RATIO,
@@ -20,16 +20,19 @@ def fitness_score(network, weights, total_potential_transport_nodes, total_netwo
     weighted_internal_connectivity = weights["w_int"] * internal_connectivity
     weighted_external_connectivity = weights["w_ext"] * external_connectivity
 
-    network_coverage = get_network_coverage(road_snapped_network_graph, total_network_distance, allowed_edge, edge_len)
+    network_coverage = get_network_coverage(network.graph, total_network_distance, allowed_edge, edge_len)
     weighted_network_coverage = weights["w_cov"] * network_coverage
 
-    vul, q_c_vul = compute_vulnerability(road_snapped_network_graph)
+    vul, q_c_vul = compute_vulnerability(network.graph)
     vulnerability = normalize_vul_rob(vul, q_c_vul)
     weighted_vulnerability = weights["w_vul"] * vulnerability
 
-    rob, q_c_rob = compute_robustness(road_snapped_network_graph)
+    rob, q_c_rob = compute_robustness(network.graph)
     robustness = normalize_vul_rob(rob, q_c_rob)
     weighted_robustness = weights["w_rob"] * robustness
+
+    redundancy = compute_redundancy(network)
+    weighted_redundancy = weights["w_rob"] * redundancy
 
     data = {
         "Coverage": weighted_network_coverage,
@@ -44,7 +47,7 @@ def fitness_score(network, weights, total_potential_transport_nodes, total_netwo
         "Vulnerability Raw": vulnerability,
         "Robustness Raw": robustness,
 
-        "Total Network Nodes": len(road_snapped_network_graph.nodes()),
+        "Total Network Nodes": len(network.graph.nodes()),
         "Total Potential Transport Nodes": total_potential_transport_nodes,
 
         "n_i": internal_details["n_i"],
@@ -71,6 +74,7 @@ def fitness_score(network, weights, total_potential_transport_nodes, total_netwo
         + weights["w_ext"]
         + weights["w_vul"]
         + weights["w_rob"]
+        + weights["w_red"]
     )
 
     weighted_sum = (
@@ -79,6 +83,7 @@ def fitness_score(network, weights, total_potential_transport_nodes, total_netwo
         + weighted_external_connectivity
         + weighted_vulnerability
         + weighted_robustness
+        + weighted_redundancy
     )
 
     fitness_score = 0.0 if total_weight <= 0 else weighted_sum / total_weight
@@ -87,7 +92,7 @@ def fitness_score(network, weights, total_potential_transport_nodes, total_netwo
 
 # stop costs based off singapore minimum size (9m x 3m) with length multiplied by factor of 1x, 1.5x, 2x
 # price is computed based off dotr figures (28k per sqm)
-def compute_capex_cost(
+def fitness_capex_cost(
     network: Network, 
     stop_cost: int = STOP_COST,
     stop_sizes: list[float] = STOP_SIZES, 
@@ -104,6 +109,11 @@ def compute_capex_cost(
 
     violation = max(0, capex_cost - max_budget)
     return capex_cost, violation
+
+def fitness_user_cost(
+        network: Network
+):
+    return
 
 # map stop size by number of degrees, return size of stop based on its stop class
 def get_stop_area(network, stop, stop_sizes, max_degree):
@@ -203,7 +213,7 @@ def compute_external_connectivity(
     total_potential_transport_nodes,
     min_transpo_stops_per_route=MIN_TRANSPO_STOPS_PER_ROUTE
 ):
-    total_nodes = len(network.nodes())
+    total_nodes = len(network.graph.nodes())
     if total_nodes == 0:
         return 0.0, {
             "total_nodes": 0,
@@ -214,18 +224,28 @@ def compute_external_connectivity(
             "min_transpo_stops_per_route": min_transpo_stops_per_route,
         }
 
-    route_family_stops = get_route_family_stop_map(network)
-    total_route_families = len(route_family_stops)
+    # route_family_stops = get_route_family_stop_map(network)
+    # total_route_families = len(route_family_stops)
+
+    stop_list = {}
+    for u, v, route in network.graph.edges(keys=True):
+        if route not in stop_list:
+            stop_list[route] = set()
+
+        stop_list[route].add(u)
+        stop_list[route].add(v)
+
+    total_routes = len(stop_list)
 
     transpo_nodes = {
-        node for node, node_data in network.nodes(data=True)
-        if node_data.get("isTranspo", False) is True
+        node for node, node_data in network.graph.nodes(data=True)
+        if node_data.get("isTranspo", False)
     }
 
     n_e = len(transpo_nodes)
     N_e = max(1, total_potential_transport_nodes)
 
-    if total_route_families == 0:
+    if total_routes == 0:
         return 0.0, {
             "total_nodes": total_nodes,
             "n_e": n_e,
@@ -236,12 +256,12 @@ def compute_external_connectivity(
         }
 
     r_e = 0
-    for route_family, stops in route_family_stops.items():
+    for _, stops in stop_list.items():
         transpo_count = sum(1 for stop in stops if stop in transpo_nodes)
         if transpo_count >= min_transpo_stops_per_route:
             r_e += 1
 
-    R_e = total_route_families
+    R_e = total_routes
 
     external_connectivity = 0.5 * (
         min(n_e / N_e, 1.0) +
@@ -395,28 +415,109 @@ def max_degree_node_first(deg_view):
             max_n = n
     return max_n, max_d
 
-def get_route_family_stop_map(network):
-    """
-    Returns:
-        dict[route_family] = set of stop nodes touched by that route family
-    Counts A/B as one route family.
-    """
-    route_family_stops = {}
-
-    for u, v, key in network.edges(keys=True):
-        if not (isinstance(key, str) and '-' in key):
-            continue
-
-        route_family = key.split('-')[0]
-        if route_family not in route_family_stops:
-            route_family_stops[route_family] = set()
-
-        route_family_stops[route_family].add(u)
-        route_family_stops[route_family].add(v)
-
-    return route_family_stops
-
 def normalize_vul_rob(vul_rob, q_c):
     # With fixed q_c = 10% removals, max possible R' is q_c
     # because R' = (1/N) * sum s(q), and each s(q) <= 1.
     return 0.0 if q_c <= 0 else vul_rob / q_c
+
+def fitness_score(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len):
+    internal_connectivity, internal_details = compute_internal_connectivity(
+        network,
+        target_node_ratio=TARGET_NODE_RATIO,
+        min_intersections_per_route=MIN_INTERSECTIONS_PER_ROUTE
+    )
+
+    external_connectivity, external_details = compute_external_connectivity(
+        network,
+        total_potential_transport_nodes=total_potential_transport_nodes,
+        min_transpo_stops_per_route=MIN_TRANSPO_STOPS_PER_ROUTE
+    )
+
+    weighted_internal_connectivity = weights["w_int"] * internal_connectivity
+    weighted_external_connectivity = weights["w_ext"] * external_connectivity
+
+    network_coverage = get_network_coverage(network.graph, total_network_distance, allowed_edge, edge_len)
+    weighted_network_coverage = weights["w_cov"] * network_coverage
+
+    vul, q_c_vul = compute_vulnerability(network.graph)
+    vulnerability = normalize_vul_rob(vul, q_c_vul)
+    weighted_vulnerability = weights["w_vul"] * vulnerability
+
+    rob, q_c_rob = compute_robustness(network.graph)
+    robustness = normalize_vul_rob(rob, q_c_rob)
+    weighted_robustness = weights["w_rob"] * robustness
+
+    data = {
+        "Coverage": weighted_network_coverage,
+        "Internal Connectivity": weighted_internal_connectivity,
+        "External Connectivity": weighted_external_connectivity,
+        "Vulnerability": weighted_vulnerability,
+        "Robustness": weighted_robustness,
+
+        "Coverage Raw": network_coverage,
+        "Internal Connectivity Raw": internal_connectivity,
+        "External Connectivity Raw": external_connectivity,
+        "Vulnerability Raw": vulnerability,
+        "Robustness Raw": robustness,
+
+        "Total Network Nodes": len(network.graph.nodes()),
+        "Total Potential Transport Nodes": total_potential_transport_nodes,
+
+        "n_i": internal_details["n_i"],
+        "N_i": internal_details["N_i"],
+        "r_i": internal_details["r_i"],
+        "R_i": internal_details["R_i"],
+        "Min Intersections Per Route": internal_details["min_intersections_per_route"],
+
+        "n_e": external_details["n_e"],
+        "N_e": external_details["N_e"],
+        "r_e": external_details["r_e"],
+        "R_e": external_details["R_e"],
+        "Min Transpo Stops Per Route": external_details["min_transpo_stops_per_route"],
+
+        "Target Node Ratio": TARGET_NODE_RATIO,
+
+        "q_c Vulnerability": q_c_vul,
+        "q_c Robustness": q_c_rob,
+    }
+
+    total_weight = (
+        weights["w_cov"]
+        + weights["w_int"]
+        + weights["w_ext"]
+        + weights["w_vul"]
+        + weights["w_rob"]
+    )
+
+    weighted_sum = (
+        weighted_network_coverage
+        + weighted_internal_connectivity
+        + weighted_external_connectivity
+        + weighted_vulnerability
+        + weighted_robustness
+    )
+
+    fitness_score = 0.0 if total_weight <= 0 else weighted_sum / total_weight
+
+    return fitness_score, data
+
+# def get_route_family_stop_map(network):
+#     """
+#     Returns:
+#         dict[route_family] = set of stop nodes touched by that route family
+#     Counts A/B as one route family.
+#     """
+#     route_family_stops = {}
+
+#     for u, v, key in network.edges(keys=True):
+#         if not (isinstance(key, str) and '-' in key):
+#             continue
+
+#         route_family = key.split('-')[0]
+#         if route_family not in route_family_stops:
+#             route_family_stops[route_family] = set()
+
+#         route_family_stops[route_family].add(u)
+#         route_family_stops[route_family].add(v)
+
+#     return route_family_stops
