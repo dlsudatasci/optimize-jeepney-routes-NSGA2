@@ -4,14 +4,32 @@ from genetic_algorithm.schema import Route, Network
 
 from config.config import TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE, STOP_COST, STOP_SIZES, MAX_BUDGET, MAX_DEGREE
 
+def fitness_score(
+    network: Network, 
+    weights, 
+    total_potential_transport_nodes, 
+    total_network_distance, 
+    allowed_edge, 
+    edge_len,
+    stop_cost: int = STOP_COST,
+    stop_sizes: list[float] = STOP_SIZES,
+    max_degree: list[int] = MAX_DEGREE,
+    max_budget: int = MAX_BUDGET
+):
+    network_scores = []
+    # network_scores.append(fitness_user_cost(network)))
+    network_scores.append(fitness_network_efficiency(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len))
+    network_scores.append(fitness_capex_cost(network, stop_cost, stop_sizes, max_degree, max_budget))
+    return network_scores
+
 def fitness_network_efficiency(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len):
-    internal_connectivity, internal_details = compute_internal_connectivity(
+    internal_connectivity = compute_internal_connectivity(
         network,
         target_node_ratio=TARGET_NODE_RATIO,
         min_intersections_per_route=MIN_INTERSECTIONS_PER_ROUTE
     )
 
-    external_connectivity, external_details = compute_external_connectivity(
+    external_connectivity = compute_external_connectivity(
         network,
         total_potential_transport_nodes=total_potential_transport_nodes,
         min_transpo_stops_per_route=MIN_TRANSPO_STOPS_PER_ROUTE
@@ -31,42 +49,42 @@ def fitness_network_efficiency(network, weights, total_potential_transport_nodes
     robustness = normalize_vul_rob(rob, q_c_rob)
     weighted_robustness = weights["w_rob"] * robustness
 
-    redundancy = compute_redundancy(network)
+    redundancy = compute_redundancy(network, edge_len)
     weighted_redundancy = weights["w_rob"] * redundancy
 
-    data = {
-        "Coverage": weighted_network_coverage,
-        "Internal Connectivity": weighted_internal_connectivity,
-        "External Connectivity": weighted_external_connectivity,
-        "Vulnerability": weighted_vulnerability,
-        "Robustness": weighted_robustness,
+    # data = {
+    #     "Coverage": weighted_network_coverage,
+    #     "Internal Connectivity": weighted_internal_connectivity,
+    #     "External Connectivity": weighted_external_connectivity,
+    #     "Vulnerability": weighted_vulnerability,
+    #     "Robustness": weighted_robustness,
 
-        "Coverage Raw": network_coverage,
-        "Internal Connectivity Raw": internal_connectivity,
-        "External Connectivity Raw": external_connectivity,
-        "Vulnerability Raw": vulnerability,
-        "Robustness Raw": robustness,
+    #     "Coverage Raw": network_coverage,
+    #     "Internal Connectivity Raw": internal_connectivity,
+    #     "External Connectivity Raw": external_connectivity,
+    #     "Vulnerability Raw": vulnerability,
+    #     "Robustness Raw": robustness,
 
-        "Total Network Nodes": len(network.graph.nodes()),
-        "Total Potential Transport Nodes": total_potential_transport_nodes,
+    #     "Total Network Nodes": len(network.graph.nodes()),
+    #     "Total Potential Transport Nodes": total_potential_transport_nodes,
 
-        "n_i": internal_details["n_i"],
-        "N_i": internal_details["N_i"],
-        "r_i": internal_details["r_i"],
-        "R_i": internal_details["R_i"],
-        "Min Intersections Per Route": internal_details["min_intersections_per_route"],
+    #     "n_i": internal_details["n_i"],
+    #     "N_i": internal_details["N_i"],
+    #     "r_i": internal_details["r_i"],
+    #     "R_i": internal_details["R_i"],
+    #     "Min Intersections Per Route": internal_details["min_intersections_per_route"],
 
-        "n_e": external_details["n_e"],
-        "N_e": external_details["N_e"],
-        "r_e": external_details["r_e"],
-        "R_e": external_details["R_e"],
-        "Min Transpo Stops Per Route": external_details["min_transpo_stops_per_route"],
+    #     "n_e": external_details["n_e"],
+    #     "N_e": external_details["N_e"],
+    #     "r_e": external_details["r_e"],
+    #     "R_e": external_details["R_e"],
+    #     "Min Transpo Stops Per Route": external_details["min_transpo_stops_per_route"],
 
-        "Target Node Ratio": TARGET_NODE_RATIO,
+    #     "Target Node Ratio": TARGET_NODE_RATIO,
 
-        "q_c Vulnerability": q_c_vul,
-        "q_c Robustness": q_c_rob,
-    }
+    #     "q_c Vulnerability": q_c_vul,
+    #     "q_c Robustness": q_c_rob,
+    # }
 
     total_weight = (
         weights["w_cov"]
@@ -88,7 +106,7 @@ def fitness_network_efficiency(network, weights, total_potential_transport_nodes
 
     fitness_score = 0.0 if total_weight <= 0 else weighted_sum / total_weight
 
-    return fitness_score, data
+    return fitness_score
 
 # stop costs based off singapore minimum size (9m x 3m) with length multiplied by factor of 1x, 1.5x, 2x
 # price is computed based off dotr figures (28k per sqm)
@@ -99,6 +117,7 @@ def fitness_capex_cost(
     max_degree: list[int] = MAX_DEGREE,
     max_budget: int = MAX_BUDGET
 ):
+    fixed_penalty = 100000000 # placeholder?
     area = 0.0
     for stop in network.graph.nodes():
         if network.graph.degree(stop) < 1:
@@ -106,9 +125,9 @@ def fitness_capex_cost(
         area += get_stop_area(network.graph, stop, stop_sizes, max_degree)
 
     capex_cost = area * stop_cost
-
-    violation = max(0, capex_cost - max_budget)
-    return capex_cost, violation
+    if(capex_cost - max_budget > 0):
+        capex_cost += fixed_penalty
+    return capex_cost
 
 def fitness_user_cost(
         network: Network
@@ -140,22 +159,22 @@ def compute_internal_connectivity(
 
     total_nodes = len(network.graph.nodes())
     if total_nodes == 0:
-        return 0.0, {
-            "n_i": 0,
-            "N_i": 0,
-            "r_i": 0,
-            "R_i": 0,
-            "min_intersections_per_route": min_intersections_per_route,
-        }
+        return 0.0 #, {
+        #     "n_i": 0,
+        #     "N_i": 0,
+        #     "r_i": 0,
+        #     "R_i": 0,
+        #     "min_intersections_per_route": min_intersections_per_route,
+        # }
 
     if not network.routes:
-        return 0.0, {
-            "n_i": 0,
-            "N_i": max(1, int(total_nodes * target_node_ratio)),
-            "r_i": 0,
-            "R_i": 0,
-            "min_intersections_per_route": min_intersections_per_route,
-        }
+        return 0.0 #, {
+        #     "n_i": 0,
+        #     "N_i": max(1, int(total_nodes * target_node_ratio)),
+        #     "r_i": 0,
+        #     "R_i": 0,
+        #     "min_intersections_per_route": min_intersections_per_route,
+        # }
 
     routes_by_direction = {}
     route_stops = {}
@@ -197,16 +216,16 @@ def compute_internal_connectivity(
         (r_i / R_i if R_i > 0 else 0.0)
     )
 
-    details = {
-        "total_nodes": total_nodes,
-        "n_i": n_i,
-        "N_i": N_i,
-        "r_i": r_i,
-        "R_i": R_i,
-        "min_intersections_per_route": min_intersections_per_route,
-    }
+    # details = {
+    #     "total_nodes": total_nodes,
+    #     "n_i": n_i,
+    #     "N_i": N_i,
+    #     "r_i": r_i,
+    #     "R_i": R_i,
+    #     "min_intersections_per_route": min_intersections_per_route,
+    # }
 
-    return internal_connectivity, details
+    return internal_connectivity #, details
 
 def compute_external_connectivity(
     network,
@@ -215,14 +234,14 @@ def compute_external_connectivity(
 ):
     total_nodes = len(network.graph.nodes())
     if total_nodes == 0:
-        return 0.0, {
-            "total_nodes": 0,
-            "n_e": 0,
-            "N_e": max(1, total_potential_transport_nodes),
-            "r_e": 0,
-            "R_e": 0,
-            "min_transpo_stops_per_route": min_transpo_stops_per_route,
-        }
+        return 0.0 #, {
+        #     "total_nodes": 0,
+        #     "n_e": 0,
+        #     "N_e": max(1, total_potential_transport_nodes),
+        #     "r_e": 0,
+        #     "R_e": 0,
+        #     "min_transpo_stops_per_route": min_transpo_stops_per_route,
+        # }
 
     # route_family_stops = get_route_family_stop_map(network)
     # total_route_families = len(route_family_stops)
@@ -246,14 +265,14 @@ def compute_external_connectivity(
     N_e = max(1, total_potential_transport_nodes)
 
     if total_routes == 0:
-        return 0.0, {
-            "total_nodes": total_nodes,
-            "n_e": n_e,
-            "N_e": N_e,
-            "r_e": 0,
-            "R_e": 0,
-            "min_transpo_stops_per_route": min_transpo_stops_per_route,
-        }
+        return 0.0 #, {
+        #     "total_nodes": total_nodes,
+        #     "n_e": n_e,
+        #     "N_e": N_e,
+        #     "r_e": 0,
+        #     "R_e": 0,
+        #     "min_transpo_stops_per_route": min_transpo_stops_per_route,
+        # }
 
     r_e = 0
     for _, stops in stop_list.items():
@@ -268,16 +287,16 @@ def compute_external_connectivity(
         (r_e / R_e if R_e > 0 else 0.0)
     )
 
-    details = {
-        "total_nodes": total_nodes,
-        "n_e": n_e,
-        "N_e": N_e,
-        "r_e": r_e,
-        "R_e": R_e,
-        "min_transpo_stops_per_route": min_transpo_stops_per_route,
-    }
+    # details = {
+    #     "total_nodes": total_nodes,
+    #     "n_e": n_e,
+    #     "N_e": N_e,
+    #     "r_e": r_e,
+    #     "R_e": R_e,
+    #     "min_transpo_stops_per_route": min_transpo_stops_per_route,
+    # }
 
-    return external_connectivity, details
+    return external_connectivity #, details
 
 def compute_vulnerability(network_graph):
     G = network_graph.copy()
@@ -420,7 +439,7 @@ def normalize_vul_rob(vul_rob, q_c):
     # because R' = (1/N) * sum s(q), and each s(q) <= 1.
     return 0.0 if q_c <= 0 else vul_rob / q_c
 
-def fitness_score(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len):
+def _fitness_score(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len):
     internal_connectivity, internal_details = compute_internal_connectivity(
         network,
         target_node_ratio=TARGET_NODE_RATIO,

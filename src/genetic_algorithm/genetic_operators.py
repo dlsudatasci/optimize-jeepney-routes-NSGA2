@@ -80,11 +80,11 @@ def crossover(network1: Network, network2: Network):
 
     split_idx = random.randint(1, min_length - 1)
 
-    child1_raw = lines1.routes[:split_idx] + lines2.routes[split_idx:]
-    child2_raw = lines2.routes[:split_idx] + lines1.routes[split_idx:]
+    child1_raw = lines1[:split_idx] + lines2[split_idx:]
+    child2_raw = lines2[:split_idx] + lines1[split_idx:]
 
-    child1_spare = lines1.routes[split_idx:] + lines2.routes[:split_idx]
-    child2_spare = lines2.routes[split_idx:] + lines1.routes[:split_idx]
+    child1_spare = lines1[split_idx:] + lines2[:split_idx]
+    child2_spare = lines2[split_idx:] + lines1[:split_idx]
 
     child1_repaired = repair_chromosome(child1_raw, child1_spare)
     child2_repaired = repair_chromosome(child2_raw, child2_spare)
@@ -102,10 +102,12 @@ def crossover(network1: Network, network2: Network):
 
                 src_graph = parent_graphs[0] if route in network1.routes else parent_graphs[1]
 
-                new_route = Route([copy.deepcopy(r) for r in route.route], route.route_id, route.length)
+                new_route = Route([copy.deepcopy(r) for r in route.route], route.route_id, route.length, route.line_id, route.direction)
 
-                for u, v in route.route:
+                for connection in route.route:
                     # Add nodes and track used stops
+                    u = connection[0]
+                    v = connection[-1]
                     child_graph.add_node(u, **src_graph.nodes[u])
                     child_graph.add_node(v, **src_graph.nodes[v])
                     child_stops.add(u)

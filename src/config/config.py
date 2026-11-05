@@ -20,3 +20,4 @@ FITNESS_WEIGHTS = {
     "w_rob": 0.20,
     "w_red": 0.20,
 }
+FILTER_OPTIONS = ['primary', 'secondary', 'tertiary', 'trunk', 'unclassified']
