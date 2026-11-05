@@ -93,9 +93,9 @@ def fitness_network_efficiency(network, weights, total_potential_transport_nodes
 # stop costs based off singapore minimum size (9m x 3m) with length multiplied by factor of 1x, 1.5x, 2x
 # price is computed based off dotr figures (28k per sqm)
 def fitness_capex_cost(
-    network: Network, 
+    network: Network,
     stop_cost: int = STOP_COST,
-    stop_sizes: list[float] = STOP_SIZES, 
+    stop_sizes: list[float] = STOP_SIZES,
     max_degree: list[int] = MAX_DEGREE,
     max_budget: int = MAX_BUDGET
 ):
@@ -129,7 +129,7 @@ def compute_internal_connectivity(
     target_node_ratio=TARGET_NODE_RATIO,
     min_intersections_per_route=MIN_INTERSECTIONS_PER_ROUTE
 ):
-    """   
+    """
         n_i = the number of intersection nodes, aka when 2+ routes stop there in the same direction
         N_i = nodes * target node ratio, decimals truncated and floor set at 1
         r_i = the number of routes containing intersection nodes >= intersection threshold
@@ -357,9 +357,9 @@ def compute_redundancy(network: Network, edge_len) -> float:
 def get_network_coverage(network_graph, total_network_distance: int, allowed_edge: dict[tuple[int, int], bool], edge_len:  dict[tuple[int, int], float]):
     # This will contain all the edges travelled
 
-    if (total_network_distance == 0): 
+    if (total_network_distance == 0):
             return 0.0
-    
+
     serviced = {}
     for _, _, edge_data in network_graph.edges(data=True):
         prev_stop = None
@@ -521,3 +521,20 @@ def fitness_score(network, weights, total_potential_transport_nodes, total_netwo
 #         route_family_stops[route_family].add(v)
 
 #     return route_family_stops
+
+
+def _pct_tag(w):
+    """
+    Convert weight (0.6) -> '60', (0.02) -> '02', (1.0) -> '100'
+    Assumes weights are in [0,1].
+    """
+    return f"{int(round(w * 100)):02d}"  # 0.1->10, 0.05->05
+
+def make_run_tag(weights):
+    return (
+        f"cov{_pct_tag(weights["w_cov"])}"
+        f"_int{_pct_tag(weights["w_int"])}"
+        f"_ext{_pct_tag(weights["w_ext"])}"
+        f"_vul{_pct_tag(weights["w_vul"])}"
+        f"_rob{_pct_tag(weights["w_rob"])}"
+    )

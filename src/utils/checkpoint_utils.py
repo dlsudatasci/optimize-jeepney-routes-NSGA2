@@ -47,19 +47,3 @@ def save_data(data, path):
 def load_data(path):
     with open(path, 'rb') as f:
         return pickle.load(f)
-
-def _pct_tag(w):
-    """
-    Convert weight (0.6) -> '60', (0.02) -> '02', (1.0) -> '100'
-    Assumes weights are in [0,1].
-    """
-    return f"{int(round(w * 100)):02d}"  # 0.1->10, 0.05->05
-
-def make_run_tag(weights):
-    return (
-        f"cov{_pct_tag(weights["w_cov"])}"
-        f"_int{_pct_tag(weights["w_int"])}"
-        f"_ext{_pct_tag(weights["w_ext"])}"
-        f"_vul{_pct_tag(weights["w_vul"])}"
-        f"_rob{_pct_tag(weights["w_rob"])}"
-    )
