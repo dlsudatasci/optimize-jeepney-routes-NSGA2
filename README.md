@@ -1,5 +1,10 @@
 # optimize-jeepney-routes-NSGA2
 
+## Prerequisites
+* Python free-threading
+* GDAL
+* uv package manager
+
 ## Setup
 Run if u wanna update the venv:
 ```

@@ -1,3 +1,10 @@
+from dataclasses import dataclass, field
+import random
+from typing import Sequence
+
+import numpy as np
+import networkx as nx
+
 class Stop:
     def __init__(self, lat: float, long: float, isTranspo: bool, stop_id: int, area):
         self.lat = lat
@@ -23,18 +30,69 @@ class Route:
         self.direction = direction # could only be "forward" or "reverse"
 
 class Network:
-    def __init__(self, routes: list[Route], stops, graph):
+    def __init__(self, routes: list[Route], graph: nx.MultiDiGraph):
         self.routes = routes
-        self.stops = stops
         self.graph = graph
-        self.fitness_score = 0
-        self.fitness_score_components = {} # Individual components for fitness
-        # self.reversed_stops = reversed_stops
-        # self.reversed_routes = reversed_routes
+        self.fitness_score = None
+        self.fitness_score_components = {} # individual components for fitness
 
-class Generation:
-    def __init__(self, networks: list[Network], conn_type: str, total_road_distance: float, walking_distance: int):
-        self.networks = networks
-        self.conn_type = conn_type
-        self.total_road_distance = total_road_distance
-        self.walking_distance = walking_distance
+@dataclass(frozen=True, slots=True)
+class HyperParameters:
+    fitness_weights: dict
+    mutation_probability: float = 0.2
+    mutations_per_child: Sequence[float] = (0.1, 0.1, 0.4, 0.2, 0.2)
+    mutations_per_child_identical: Sequence[float] = (0.0, 0.1, 0.4, 0.3, 0.2)
+    plateau_threshold: float = 1e-11
+    plateau_count_limit: int = 10_000
+    max_generations: int = 50_000
+    selection_fraction: float = 0.10
+    checkpoint_every: int = 10
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, any]) -> "HyperParameters":
+        return cls(**raw)
+
+@dataclass
+class RunState:
+    network_population: list[Network]
+    generation_num: int = 1
+    max_score_list: list = field(default_factory=list)
+    best_population: list | None = None
+    prev_max_score: float | None = None
+    plateau_counter: int = 0
+    best_max_score: float = 0.0
+    best_avg_score: float = 0.0
+    elapsed_before: float = 0.0
+
+    def to_checkpoint(self, elapsed_total: float) -> dict:
+        return {
+            "generation_num": self.generation_num,
+            "network_population": self.network_population,
+            "max_score_list": self.max_score_list,
+            "most_optimal_gen": self.best_population,
+            "prev_max_fitness_score": self.prev_max_score,
+            "plateau_counter": self.plateau_counter,
+            "current_highest_max_score": self.best_max_score,
+            "current_highest_avg_score": self.best_avg_score,
+            "elapsed_seconds": elapsed_total,
+            "python_random_state": random.getstate(),
+            "numpy_random_state": np.random.get_state(),
+        }
+
+    @classmethod
+    def from_checkpoint(cls, checkpoint: dict) -> "RunState":
+        if "python_random_state" in checkpoint:
+            random.setstate(checkpoint["python_random_state"])
+        if "numpy_random_state" in checkpoint:
+            np.random.set_state(checkpoint["numpy_random_state"])
+        return cls(
+            population=checkpoint["network_population"],
+            generation_num=checkpoint.get("generation_num", 1),
+            max_score_list=checkpoint["max_score_list"],
+            best_population=checkpoint["most_optimal_gen"],
+            prev_max_score=checkpoint["prev_max_fitness_score"],
+            plateau_counter=checkpoint["plateau_counter"],
+            best_max_score=checkpoint["current_highest_max_score"],
+            best_avg_score=checkpoint["current_highest_avg_score"],
+            elapsed_before=checkpoint.get("elapsed_seconds", 0.0),
+        )
