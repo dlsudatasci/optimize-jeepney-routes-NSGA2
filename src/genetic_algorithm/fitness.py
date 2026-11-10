@@ -50,7 +50,7 @@ def fitness_network_efficiency(network, weights, total_potential_transport_nodes
     weighted_robustness = weights["w_rob"] * robustness
 
     redundancy = compute_redundancy(network, edge_len)
-    weighted_redundancy = weights["w_rob"] * redundancy
+    weighted_redundancy = weights["w_red"] * redundancy
 
     # data = {
     #     "Coverage": weighted_network_coverage,
