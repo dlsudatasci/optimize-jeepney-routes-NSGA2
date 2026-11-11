@@ -1,4 +1,4 @@
-WALKING_DISTANCES = [300,550,800]
+WALKING_DISTANCES = [500, 750, 1000] # changed to thesis paper
 MAX_DISTANCE = 15
 CONNECTION_TYPES = ["Default", "Area", "Degree", "Mixed"]
 
