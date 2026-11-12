@@ -1,0 +1,221 @@
+import random
+
+import networkx as nx
+from geopy.distance import geodesic
+
+from config.config import MAX_DISTANCE
+from genetic_algorithm.reverse_routes import get_reverse_route
+from utils.route_utils import add_stops_to_list
+
+# MUTATION FUNCTION
+
+# Modify the stop connections of a random route in the network
+# Randomly select a route and randomly select a stop in that route
+# Then randomly select another stop that is a not too far from the selected stop based on threshold
+# Swap connections with that stop
+def mutate(network_to_mutate, graph_of_stops, list_of_stops):
+    # Randomly select a route
+    random_route_obj = random.choice(network_to_mutate.routes)
+    random_route_obj_index = network_to_mutate.routes.index(random_route_obj)
+
+    random_route = random_route_obj.route
+    random_route_id = random_route_obj.route_id
+
+    # One connection means the route is just its two terminal stops, which are
+    # fixed, so there is no interior stop to swap
+    if len(random_route) < 2:
+        return
+
+    # Randomly select a stop in the route
+    index_array = list(range(1, len(random_route)))
+    connection_index = random.choice(index_array)
+    random_node_connection = random_route[connection_index]
+
+    # Walking Distance
+    set_walk_distance = network_to_mutate.walk_distance
+
+    # The destination end needs a following connection, so the last connection
+    # can only be swapped at its origin end.
+    if connection_index == len(random_route) - 1:
+        connection_stop_index = 0
+    else:
+        connection_stop_index = random.choice([0, -1]) # Choose whether the origin or destination node
+    random_stop = random_node_connection[connection_stop_index] # The random stop to be swapped
+
+    # Get the old total distance
+    old_total_distance = 0
+    for connection in random_route:
+        edge_data = network_to_mutate.graph.get_edge_data(connection[0], connection[-1], random_route_id)
+        old_total_distance += edge_data['distance']
+
+
+    # This is to get the subset distance (Distance without the connection with chosen random stop)
+    if connection_stop_index == 0: # If it is the origin node in that connection (A, B, C and B is the chosen. Get B-C and A-B)
+        prev_connection = random_route[connection_index-1] # Get the previous connection
+        prev_node = prev_connection[0] # Get the origin node for that connection
+        distance1 = network_to_mutate.graph.get_edge_data(prev_node, random_stop, random_route_id)['distance'] # Get the distance of the previous connection
+        distance2 = network_to_mutate.graph.get_edge_data(random_stop, random_node_connection[-1], random_route_id)['distance'] # Get the distance of the current connection
+        distance_to_subtract = distance1 + distance2
+
+        # Previous connection: node1 - random_node
+        # Current connection: random_node - node2
+        node1 = prev_node # Setting the partner nodes
+        node2 = random_node_connection[-1]
+
+    else: #If it is the dest node in that connection
+        distance1 = network_to_mutate.graph.get_edge_data(random_node_connection[0], random_stop, random_route_id)['distance'] # Get the distance of the current connection
+        next_connection = random_route[connection_index+1] # Get the next route
+        next_node = next_connection[-1] # Get the destination node for the next connection
+        distance2 = network_to_mutate.graph.get_edge_data(random_stop, next_node, random_route_id)['distance']
+        distance_to_subtract = distance1 + distance2
+
+        # Previous connection: node1 - random_node
+        # Current connection: random_node - node2
+        node2 = next_node
+        node1 = random_node_connection[0]
+
+    # Get the subset different -> This will be used to make sure that the distance of the connections to the new node will be less than or equal to MAX_DISTANCE (15km)
+    subset_distance = old_total_distance - distance_to_subtract
+
+    # Will try searching for a random stop
+    for i in range(100):
+        # Get a random stop
+        new_random_stop = random.choice(list_of_stops).id
+        new_random_stop_data = graph_of_stops.nodes[new_random_stop]
+
+        # Check if the new random stop is not within walking distance with the other stop in the route
+        # Walking distance between node1 in route and stop to be swapped with
+        source = (new_random_stop_data['y'], new_random_stop_data['x'])
+        point = (graph_of_stops.nodes[node1]['y'], graph_of_stops.nodes[node1]['x'])
+        walking_distance1 = geodesic(source, point).meters
+
+        # Walking distance between node2 in route and stop to be swapped with
+        source = (new_random_stop_data['y'], new_random_stop_data['x'])
+        point = (graph_of_stops.nodes[node2]['y'], graph_of_stops.nodes[node2]['x'])
+        walking_distance2 = geodesic(source, point).meters
+
+        # Check if it already has been used in the route
+        isCandidate = True
+        for connection in random_route:
+            if new_random_stop == connection[0] or new_random_stop == connection[-1]:
+                isCandidate = False
+                continue
+
+        # Check if the edge has already been used
+        has_edge1 = network_to_mutate.graph.has_edge(node1, new_random_stop, random_route_id)
+        has_edge2 = network_to_mutate.graph.has_edge(new_random_stop, node1, random_route_id)
+        has_edge3 = network_to_mutate.graph.has_edge(new_random_stop, node2, random_route_id)
+        has_edge4 = network_to_mutate.graph.has_edge(node2, new_random_stop, random_route_id)
+
+        # If it is not within walking distances, has not been used in the same route, has a path, has no existing edge
+        if walking_distance1 >= set_walk_distance and walking_distance2 >= set_walk_distance and isCandidate and nx.has_path(graph_of_stops, node1, new_random_stop) and nx.has_path(graph_of_stops, new_random_stop, node2) and not has_edge1 and not has_edge2 and not has_edge3 and not has_edge4:
+            # DISTANCE 1: Get the total distance from point A to point B
+            shortest_route1 = nx.shortest_path(graph_of_stops, node1, new_random_stop, weight='length')
+            distance_travelled1 = 0
+            for i in range(len(shortest_route1)-1):
+                node_data = graph_of_stops.nodes[shortest_route1[i]]
+                next_node_data = graph_of_stops.nodes[shortest_route1[i+1]]
+                distance_travelled1 += geodesic(
+                    (node_data['y'], node_data['x']),
+                    (next_node_data['y'], next_node_data['x'])
+                ).kilometers
+
+            # DISTANCE 2: Get the total distance from point A to point B
+            shortest_route2 = nx.shortest_path(graph_of_stops, new_random_stop, node2, weight='length')
+            distance_travelled2 = 0
+            for i in range(len(shortest_route2)-1):
+                node_data = graph_of_stops.nodes[shortest_route2[i]]
+                next_node_data = graph_of_stops.nodes[shortest_route2[i+1]]
+                distance_travelled2 += geodesic(
+                    (node_data['y'], node_data['x']),
+                    (next_node_data['y'], next_node_data['x'])
+                ).kilometers
+
+            newDistance = subset_distance + distance_travelled1 + distance_travelled2
+            # If its within the 15km distance, then this new stop can be used
+            if newDistance <= MAX_DISTANCE:
+                # Add the new stop to the used stops
+                if new_random_stop not in network_to_mutate.stops:
+                    network_to_mutate.stops.append(new_random_stop)
+
+                # Modify the graph by adding the new node
+                network_to_mutate.graph.add_node(new_random_stop, **graph_of_stops.nodes[new_random_stop])
+
+                # Connect the new stop to the edges
+                network_to_mutate.graph.add_edge(shortest_route1[0], shortest_route1[-1], key=random_route_id, road_path = shortest_route1, distance = distance_travelled1) # Add edge
+                network_to_mutate.graph.add_edge(shortest_route2[0], shortest_route2[-1], key=random_route_id, road_path = shortest_route2, distance = distance_travelled2) # Add edge
+
+                # Remove the old connections and node if it has no other connections
+                network_to_mutate.graph.remove_edge(node1, random_stop, random_route_id)
+                network_to_mutate.graph.remove_edge(random_stop, node2, random_route_id)
+                if (network_to_mutate.graph.degree(random_stop) == 0):
+                    network_to_mutate.graph.remove_node(random_stop)
+                    network_to_mutate.stops.remove(random_stop)
+
+
+                # Modify the route
+                if connection_stop_index == 0: #If its the origin node
+                    random_route[connection_index-1] = shortest_route1 # Change the previous connection
+                    random_route[connection_index] = shortest_route2 # Change the current connection
+
+                else: #else If its the dest node
+                    random_route[connection_index] = shortest_route1 # Change the current connection
+                    random_route[connection_index+1] = shortest_route2 # Change the next connection
+
+                # Modify the distance of the modified route
+                random_route_obj.length = newDistance
+
+
+                # REVERSE
+                original_reverse_route = network_to_mutate.reversed_routes[random_route_obj_index]
+                if original_reverse_route is not None:
+                    original_reverse_route_id = original_reverse_route.route_id
+                    # print(f"Reverse Key: {original_reverse_route_id}")
+                    # print(f"Key: {random_route_id}")
+
+                    for connection in original_reverse_route.route:
+                        # print(f"{connection[0]} - {connection[-1]}")
+                        if not network_to_mutate.graph.has_edge(connection[0], connection[-1], original_reverse_route_id):
+                            print("EDGE MISSING")
+                            # if not network_to_mutate.graph.has_node(connection[0]):
+                            #     print(f"{connection[0]} missing")
+
+                            # if not network_to_mutate.graph.has_node(connection[-1]):
+                            #     print(f"{connection[-1]} missing")
+
+                        network_to_mutate.graph.remove_edge(connection[0], connection[-1], original_reverse_route_id)
+                        if (network_to_mutate.graph.degree(connection[0]) == 0):
+                            network_to_mutate.graph.remove_node(connection[0])
+                            if connection[0] in network_to_mutate.stops:
+                                network_to_mutate.stops.remove(connection[0])
+
+                        if (network_to_mutate.graph.degree(connection[-1]) == 0):
+                            network_to_mutate.graph.remove_node(connection[-1])
+                            if connection[-1] in network_to_mutate.stops:
+                                network_to_mutate.stops.remove(connection[-1])
+
+                    reverse_route = get_reverse_route(random_route_obj, graph_of_stops, network_to_mutate.graph, network_to_mutate.walk_distance)
+                    network_to_mutate.reversed_routes[random_route_obj_index] = reverse_route
+                    new_reversed_used_stops = add_stops_to_list(network_to_mutate.reversed_routes)
+                    network_to_mutate.reversed_stops = new_reversed_used_stops
+
+                # ----------- FOR ERROR CHECKING -------------------
+                # print("Checking for graph and route consistency...")
+                # check_graph_with_route(network_to_mutate)
+                # print("Checking for graph and list of stops consistency...")
+                # check_graph_with_stops(network_to_mutate)
+                # print("Checking if order of routes is correct...")
+                # check_order_route(network_to_mutate)
+                # print("Checking for list of stops and route consistency...")
+                # check_stops_routes(network_to_mutate)
+                # print("Checking for duplicates in routes...")
+                # check_duplicate_routes(network_to_mutate)
+                # print("Checking for duplicate stops and connections...")
+                # check_duplicate_stops_routes(network_to_mutate)
+                # print()
+                # print("MUTATION DONE", flush=True)
+
+                # Break the loop once we swap
+                #print()
+                break
+
