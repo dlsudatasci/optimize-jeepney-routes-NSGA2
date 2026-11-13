@@ -5,11 +5,11 @@ from genetic_algorithm.schema import Route, Network
 from config.config import TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE, STOP_COST, STOP_SIZES, MAX_BUDGET, MAX_DEGREE
 
 def fitness_score(
-    network: Network, 
-    weights, 
-    total_potential_transport_nodes, 
-    total_network_distance, 
-    allowed_edge, 
+    network: Network,
+    weights,
+    total_potential_transport_nodes,
+    total_network_distance,
+    allowed_edge,
     edge_len,
     stop_cost: int = STOP_COST,
     stop_sizes: list[float] = STOP_SIZES,

@@ -6,7 +6,78 @@ import networkx as nx
 from genetic_algorithm.schema import Network, Route
 
 
-def calc_jaccard_sim(route1: Route, route2: Route) -> float:
+# V3 - Crossover with post-op repair
+def crossover(network1: Network, network2: Network, graph_of_stops: nx.MultiDiGraph):
+  lines1 = [(0, line) for line in group_into_lines(network1.routes)]
+  lines2 = [(1, line) for line in group_into_lines(network2.routes)]
+
+  min_length = min(len(lines1), len(lines2))
+
+  if min_length <= 1:
+    return copy.deepcopy(network1), copy.deepcopy(network2), False
+
+  split_idx = random.randint(1, min_length - 1)
+
+  child1_raw = lines1[:split_idx] + lines2[split_idx:]
+  child2_raw = lines2[:split_idx] + lines1[split_idx:]
+
+  child1_spare = lines1[split_idx:] + lines2[:split_idx]
+  child2_spare = lines2[split_idx:] + lines1[:split_idx]
+
+  child1_repaired = repair_chromosome(child1_raw, child1_spare)
+  child2_repaired = repair_chromosome(child2_raw, child2_spare)
+
+  def build_network_from_routes(
+    lines: list[tuple[int, list[Route]]],
+    parent_graphs: tuple[nx.MultiDiGraph, nx.MultiDiGraph],
+  ):
+    child_graph = nx.MultiDiGraph()
+    final_routes = []
+
+    for line_id, (parent_idx, line) in enumerate(lines):
+      src_graph = parent_graphs[parent_idx]
+
+      for route in line:
+        old_route_id = route.route_id
+        new_route_id = f"{line_id}-{route.direction[:1].upper()}"
+
+        new_route = Route(
+          route=[copy.deepcopy(r) for r in route.route],
+          route_id=new_route_id,
+          length=route.length,
+          line_id=line_id,
+          direction=route.direction,
+        )
+
+        for connection in route.route:
+          u = connection[0]
+          v = connection[-1]
+
+          u_data = src_graph.nodes[u] if u in src_graph else (graph_of_stops.nodes[u] if graph_of_stops and u in graph_of_stops else {})
+          v_data = src_graph.nodes[v] if v in src_graph else (graph_of_stops.nodes[v] if graph_of_stops and v in graph_of_stops else {})
+
+          child_graph.add_node(u, **u_data)
+          child_graph.add_node(v, **v_data)
+
+          edge_data = src_graph.get_edge_data(u, v, key=old_route_id)
+          if edge_data:
+            child_graph.add_edge(u, v, key=new_route_id, **edge_data)
+          else:
+            child_graph.add_edge(u, v, key=new_route_id, road_path=connection)
+        final_routes.append(new_route)
+
+    return Network(final_routes, child_graph)
+
+  child1 = build_network_from_routes(child1_repaired, (network1.graph, network2.graph))
+  child2 = build_network_from_routes(child2_repaired, (network1.graph, network2.graph))
+
+  return child1, child2, True
+
+# Standardizes the route for more efficiency in comparing routes
+def standardize_route(route):
+  return tuple(tuple(sorted(connection)) for connection in route)
+
+def calc_jaccard_sim(route1: Route, route2: Route):
   edges1 = set(standardize_route(route1.route))
   edges2 = set(standardize_route(route2.route))
 
@@ -77,71 +148,3 @@ def repair_chromosome(
       seen_standardized.append(std_route)
 
   return repaired_lines
-
-
-# V3 - Crossover with post-op repair
-def crossover(network1: Network, network2: Network):
-  lines1 = [(0, line) for line in group_into_lines(network1.routes)]
-  lines2 = [(1, line) for line in group_into_lines(network2.routes)]
-
-  min_length = min(len(lines1), len(lines2))
-
-  if min_length <= 1:
-    return copy.deepcopy(network1), copy.deepcopy(network2), False
-
-  split_idx = random.randint(1, min_length - 1)
-
-  child1_raw = lines1[:split_idx] + lines2[split_idx:]
-  child2_raw = lines2[:split_idx] + lines1[split_idx:]
-
-  child1_spare = lines1[split_idx:] + lines2[:split_idx]
-  child2_spare = lines2[split_idx:] + lines1[:split_idx]
-
-  child1_repaired = repair_chromosome(child1_raw, child1_spare)
-  child2_repaired = repair_chromosome(child2_raw, child2_spare)
-
-  def build_network_from_routes(
-    lines: list[tuple[int, list[Route]]],
-    parent_graphs: tuple[nx.MultiDiGraph, nx.MultiDiGraph],
-  ):
-    child_graph = nx.MultiDiGraph()
-    final_routes = []
-
-    for line_id, (parent_idx, line) in enumerate(lines):
-      src_graph = parent_graphs[parent_idx]
-
-      for route in line:
-        old_route_id = route.route_id
-        new_route_id = f"{line_id}-{route.direction[:1].upper()}"
-
-        new_route = Route(
-          route=[copy.deepcopy(r) for r in route.route],
-          route_id=new_route_id,
-          length=route.length,
-          line_id=line_id,
-          direction=route.direction,
-        )
-
-        for connection in route.route:
-          u = connection[0]
-          v = connection[-1]
-          child_graph.add_node(u, **src_graph.nodes[u])
-          child_graph.add_node(v, **src_graph.nodes[v])
-
-          edge_data = src_graph.get_edge_data(u, v, key=old_route_id)
-          if edge_data:
-            child_graph.add_edge(u, v, key=new_route_id, **edge_data)
-
-        final_routes.append(new_route)
-
-    return Network(final_routes, child_graph)
-
-  child1 = build_network_from_routes(child1_repaired, (network1.graph, network2.graph))
-  child2 = build_network_from_routes(child2_repaired, (network1.graph, network2.graph))
-
-  return child1, child2, True
-
-
-# Standardizes the route for more efficiency in comparing routes
-def standardize_route(route):
-  return tuple(tuple(sorted(connection)) for connection in route)
