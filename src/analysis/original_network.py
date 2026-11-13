@@ -1,21 +1,4 @@
-"""Loading the existing jeepney networks collected from Sakay.ph.
-
-The networks under ``data/original_jeepney_routes/Saved Networks/`` were
-pickled by an earlier version of this project, straight out of a notebook, so
-they refer to ``__main__.networkObj``, ``__main__.Route`` (three arguments) and
-``__main__.stopCandidate``. None of those exist any more, which is why a plain
-``pickle.load`` on them raises ``AttributeError``. The shim below re-registers
-just enough of the old shape for the unpickler, after which the network is
-converted to the current :class:`~genetic_algorithm.schema.Network`.
-
-Route ids in the saved data use the old ``<line>-A`` / ``<line>-B`` convention
-for the forward and return leg of a line. The current schema keeps that pairing
-in ``line_id`` and ``direction`` instead, which is what
-``compute_internal_connectivity`` reads, so the ids are translated on load.
-
-Everything here reads files already committed to the repository: no OSM
-download and no route generation, so it runs without the server.
-"""
+import pathlib
 import pickle
 import sys
 from pathlib import Path
@@ -28,9 +11,6 @@ SAVED_NETWORKS_DIR = ROOT / "data" / "saved_networks"
 
 CITIES = ("Makati", "Manila", "Taguig", "Mandaluyong")
 
-#: The amenity maps are a separate repository, checked in here as the git
-#: submodule at ``data/amenity_maps``, which is where City_Zone_Creation and
-#: IRSG already look for them.
 AMENITY_MAPS_DIR = ROOT / "data" / "amenity_maps"
 
 SUBMODULE_HINT = (
@@ -39,49 +19,57 @@ SUBMODULE_HINT = (
 
 
 def amenity_maps_path(*parts):
-    """Resolve a path under the amenity maps submodule.
-
-    Raises rather than guessing at another location: an uninitialised submodule
-    is an empty directory, and a missing file here should say how to fix it
-    instead of failing later with a bare "no such file".
-    """
     path = AMENITY_MAPS_DIR.joinpath(*parts)
     if not path.exists() and not any(AMENITY_MAPS_DIR.iterdir()
                                      if AMENITY_MAPS_DIR.is_dir() else []):
         raise FileNotFoundError(SUBMODULE_HINT)
     return path
 
+POINT_SOURCES = {
+    "Taguig": (("Taguig", "taguig_point.geojson"),
+               ("Taguig", "taguig_point.geojson.zip")),
+}
 
-#: How each city is built from its collected route data. The first element of
-#: ``routes_csv`` says where the CSV lives: ``"repo"`` for the raw Sakay.ph
-#: downloads committed here, ``"amenity_maps"`` for the submodule.
-#:
-#: All four cities are listed, not just Taguig. The three older ones do have
-#: pickles, but those were produced before two bugs in the pipeline were fixed
-#: -- stops were spliced into one direction of a two-way road, and a route was
-#: cut at its first stop outside the city -- so they can be rebuilt from the
-#: same raw data the notebook reads.
+
+def point_sources(city):
+    """The candidate amenity point files for a city, best first."""
+    return POINT_SOURCES.get(
+        city, (("Jacob-Group", f"{city} City", f"{city}_point.geojson"),))
+
+
+def read_city_points(city):
+    """A city's amenity points as a ``GeoDataFrame``."""
+    import geopandas as gpd
+
+    for parts in point_sources(city):
+        path = AMENITY_MAPS_DIR.joinpath(*parts)
+        if not path.exists():
+            continue
+        if path.suffix == ".zip":
+            return gpd.read_file(f"zip://{path.as_posix()}")
+        return gpd.read_file(path)
+
+    tried = ", ".join(str(pathlib.Path(*parts)) for parts in point_sources(city))
+    raise FileNotFoundError(
+        f"no amenity points for {city}; tried {tried}. {SUBMODULE_HINT}")
+
+
 BUILT_FROM_CSV = {
     "Taguig": {
         "routes_csv": ("amenity_maps", "Taguig", "Taguig Jeepney Routes",
                        "Taguig_routes.csv"),
-        "points": ("Taguig", "Taguig_point.geojson"),
     },
     "Makati": {
         "routes_csv": ("repo", "data", "original_jeepney_routes",
                        "Original Data", "Existing Jeepney Routes (Makati).csv"),
-        "points": ("Jacob-Group", "Makati City", "Makati_point.geojson"),
     },
     "Manila": {
         "routes_csv": ("repo", "data", "original_jeepney_routes",
                        "Original Data", "Formatted-Manila-Routes.csv"),
-        "points": ("Jacob-Group", "Manila City", "Manila_point.geojson"),
     },
     "Mandaluyong": {
         "routes_csv": ("repo", "data", "original_jeepney_routes", "Original Data",
                        "Existing Jeepney Routes (Mandaluyong).csv"),
-        "points": ("Jacob-Group", "Mandaluyong City",
-                   "Mandaluyong_point.geojson"),
     },
 }
 
@@ -93,8 +81,6 @@ def route_csv_path(recipe):
         return ROOT.joinpath(*parts)
     return amenity_maps_path(*parts)
 
-# Jeepneys are only placed on these road classes (methodology 3.3.1); tolled
-# expressways are excluded by never appearing in this set.
 ALLOWED_HIGHWAY_TYPES = frozenset(
     {"primary", "secondary", "tertiary", "trunk", "unclassified"})
 
@@ -226,12 +212,10 @@ def build_city_from_csv(city: str):
     analysis -- building walks the road graph once per stop and takes minutes,
     and an analysis run should not silently turn into a pipeline run.
     """
-    import geopandas as gpd
-
     from analysis.build_original import build_and_cache
 
     recipe = BUILT_FROM_CSV[city]
-    points = gpd.read_file(amenity_maps_path(*recipe["points"]))
+    points = read_city_points(city)
     transport = points[points["amenity"] == "transportation"]
     transport_points = [(geometry.y, geometry.x)
                         for geometry in transport.geometry]
@@ -367,13 +351,5 @@ def count_transport_amenities(city: str) -> int:
     already uses (Makati 111, Manila 464, Mandaluyong 45), which came from the
     same points filtered to the city bounds.
     """
-    import geopandas as gpd
-
-    folder = "Taguig" if city == "Taguig" else f"Jacob-Group/{city} City"
-    points = amenity_maps_path(*folder.split("/"), f"{city}_point.geojson")
-    if not points.exists():
-        raise FileNotFoundError(
-            f"no transport amenity points for {city} at {points}")
-
-    frame = gpd.read_file(points)
+    frame = read_city_points(city)
     return int((frame["amenity"] == "transportation").sum())

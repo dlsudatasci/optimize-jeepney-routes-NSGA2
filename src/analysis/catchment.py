@@ -184,7 +184,7 @@ def summarize(network, city, radius):
 
         # Whether stop degree is a usable stand-in for how busy a stop is,
         # which is the assumption get_stop_area makes when it sizes stops.
-        "Degree vs Catchment Correlation": float(
+        "Degree vs Raw Catchment Correlation": float(
             np.corrcoef(degrees, stop_populations)[0, 1])
         if degrees.size > 1 and stop_populations.std() > 0 else float("nan"),
     }
