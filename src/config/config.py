@@ -4,7 +4,7 @@ WALKING_DISTANCES = [500, 750, 1000] # changed to thesis paper
 WD_TO_USE = 1
 MAX_DISTANCE = 15
 ROUTE_AMOUNT_MEDIANS = {"Makati":28, "Manila":50, "Taguig":18, "Mandaluyong":10} # og routes count (manila capped at 50 for runtime concerns)
-STOP_MIN = [20]
+STOP_MIN = 20
 
 CONNECTION_TYPES = ["Default", "Area", "Degree", "Mixed"]
 TARGET_NODE_RATIO = 0.75   #for N_i
