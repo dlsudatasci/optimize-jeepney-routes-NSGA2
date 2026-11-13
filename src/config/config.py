@@ -1,7 +1,12 @@
+# IRSG
+NETWORK_AMT = 100
 WALKING_DISTANCES = [500, 750, 1000] # changed to thesis paper
+WD_TO_USE = 1
 MAX_DISTANCE = 15
-CONNECTION_TYPES = ["Default", "Area", "Degree", "Mixed"]
+ROUTE_AMOUNT_MEDIANS = {"Makati":28, "Manila":50, "Taguig":18, "Mandaluyong":10} # og routes count (manila capped at 50 for runtime concerns)
+STOP_MIN = [20]
 
+CONNECTION_TYPES = ["Default", "Area", "Degree", "Mixed"]
 TARGET_NODE_RATIO = 0.75   #for N_i
 MIN_INTERSECTIONS_PER_ROUTE = 3   # n for r_i
 MIN_TRANSPO_STOPS_PER_ROUTE = 2   # n for r_e
