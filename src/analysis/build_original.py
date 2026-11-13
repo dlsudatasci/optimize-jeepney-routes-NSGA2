@@ -191,7 +191,7 @@ def flag_transport_stops(stops, transport_points):
     return flags
 
 
-def merge_nearby(stops, is_transport):
+def merge_nearby(stops, isTransport):
     """Collapse stops within ``MERGE_DISTANCE`` of each other.
 
     Returns ``{index: index of the stop that replaces it}``, covering only the
@@ -215,14 +215,14 @@ def merge_nearby(stops, is_transport):
     for group in groups:
         if len(group) == 1:
             continue
-        survivor = next((i for i in group if is_transport[i]), group[0])
+        survivor = next((i for i in group if isTransport[i]), group[0])
         for index in group:
             if index != survivor:
                 replacement[index] = survivor
     return replacement
 
 
-def splice_stop(graph, stop_id, lat, long, is_transport):
+def splice_stop(graph, stop_id, lat, long, isTransport):
     """Insert a stop as a node on the road edge nearest to it.
 
     The edge it lands on is cut in two and the two halves keep the original
@@ -238,7 +238,7 @@ def splice_stop(graph, stop_id, lat, long, is_transport):
     node1, node2, key = ox.distance.nearest_edges(graph, X=long, Y=lat)
     data = dict(graph.get_edge_data(node1, node2, key))
 
-    graph.add_node(stop_id, x=long, y=lat, isTranspo=is_transport)
+    graph.add_node(stop_id, x=long, y=lat, isTranspo=isTransport)
 
     start = (graph.nodes[node1]["y"], graph.nodes[node1]["x"])
     end = (graph.nodes[node2]["y"], graph.nodes[node2]["x"])

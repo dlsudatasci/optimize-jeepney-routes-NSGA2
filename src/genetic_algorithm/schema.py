@@ -48,6 +48,8 @@ class Network:
 @dataclass(frozen=True, slots=True)
 class HyperParameters:
   fitness_weights: dict
+  walk_distance: int
+  n_transport_nodes: int
   mutation_probability: float = 0.2
   mutations_per_child: Sequence[float] = (0.1, 0.1, 0.4, 0.2, 0.2)
   mutations_per_child_identical: Sequence[float] = (0.0, 0.1, 0.4, 0.3, 0.2)
@@ -96,7 +98,7 @@ class RunState:
     if "numpy_random_state" in checkpoint:
       np.random.set_state(checkpoint["numpy_random_state"])
     return cls(
-      population=checkpoint["network_population"],
+      network_population=checkpoint["network_population"],
       generation_num=checkpoint.get("generation_num", 1),
       max_score_list=checkpoint["max_score_list"],
       best_population=checkpoint["most_optimal_gen"],

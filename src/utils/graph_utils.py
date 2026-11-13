@@ -31,7 +31,7 @@ def improved_route_plot(graph, route, color, map_obj, route_id, dash_array=None)
         if idx == 0:
             lat = graph.nodes[connection[0]]['y']
             long = graph.nodes[connection[0]]['x']
-            isTranspo = graph.nodes[connection[0]]['isTranspo']
+            isTranspo = graph.nodes[connection[0]].get("isTranspo", False)
 
             folium.CircleMarker(
                 location=[lat, long],
@@ -46,7 +46,7 @@ def improved_route_plot(graph, route, color, map_obj, route_id, dash_array=None)
         # Draw end node circle marker
         lat = graph.nodes[connection[-1]]['y']
         long = graph.nodes[connection[-1]]['x']
-        isTranspo = graph.nodes[connection[-1]]['isTranspo']
+        isTranspo = graph.nodes[connection[-1]].get('isTranspo', False)
 
         folium.CircleMarker(
             location=[lat, long],
