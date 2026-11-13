@@ -13,7 +13,7 @@ import statistics
 
 import networkx as nx
 
-from genetic_algorithm.genetic_operators import group_into_lines
+from genetic_algorithm.crossover import group_into_lines
 
 
 def route_stops(route):
