@@ -6,7 +6,7 @@ from pathlib import Path
 from genetic_algorithm.schema import Network, Route
 
 ROOT = Path(__file__).resolve().parents[2]
-ORIGINAL_DIR = ROOT / "data" / "original_jeepney_routes" / "Saved Networks"
+ORIGINAL_DIR = ROOT / "data" / "jeepney_routes" / "Saved Networks"
 SAVED_NETWORKS_DIR = ROOT / "data" / "saved_networks"
 
 CITIES = ("Makati", "Manila", "Taguig", "Mandaluyong")
@@ -60,15 +60,15 @@ BUILT_FROM_CSV = {
                        "Taguig_routes.csv"),
     },
     "Makati": {
-        "routes_csv": ("repo", "data", "original_jeepney_routes",
+        "routes_csv": ("repo", "data", "jeepney_routes",
                        "Original Data", "Existing Jeepney Routes (Makati).csv"),
     },
     "Manila": {
-        "routes_csv": ("repo", "data", "original_jeepney_routes",
+        "routes_csv": ("repo", "data", "jeepney_routes",
                        "Original Data", "Formatted-Manila-Routes.csv"),
     },
     "Mandaluyong": {
-        "routes_csv": ("repo", "data", "original_jeepney_routes", "Original Data",
+        "routes_csv": ("repo", "data", "jeepney_routes", "Original Data",
                        "Existing Jeepney Routes (Mandaluyong).csv"),
     },
 }

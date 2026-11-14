@@ -69,7 +69,7 @@ optimize-jeepney-routes-NSGA2/
 │   │   │   ├── Manila_population_w300_s25_l150_n100.pkl
 │   │   │   ├── Manila_stops.pkl
 │   │   │   ├── Manila_stops_w300_s25_l150_n100.pkl
-│   ├── original_jeepney_routes/
+│   ├── jeepney_routes/
 │   │   ├── .DS_Store
 │   │   ├── Makati_routes.csv
 │   │   ├── Mandaluyong_routes.csv

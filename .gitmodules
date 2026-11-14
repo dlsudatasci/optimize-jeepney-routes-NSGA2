@@ -1,3 +1,6 @@
 [submodule "data/amenity_maps"]
 	path = data/amenity_maps
 	url = https://github.com/dlsudatasci/manila-makati-taguig-amenity-maps
+[submodule "data/jeepney_routes"]
+	path = data/jeepney_routes
+	url = https://github.com/dlsudatasci/metro-manila-jeepney-routes.git
