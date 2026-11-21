@@ -174,15 +174,17 @@ if __name__ == "__main__":
               f"{km:>11.2f}{fac:>8.3f}{speed:>7.0f}{km/speed*60:>7.0f}m")
     print(f"\ntotal trunk length: {tot:.2f} km")
 
-    osm = sum(1 for line in STATION_ORDER for *_, in [] )
     manual = []
     with open(RAIL_STATIONS_PATH, encoding="utf-8") as f:
         raw = json.load(f)
+    n_osm = sum(1 for rows in raw["lines"].values()
+                for r in rows if r.get("source") == "osm")
     for line, rows in raw["lines"].items():
         for r in rows:
             if r.get("source") == "manual":
                 manual.append(f"{line}: {r['name']}")
     if manual:
-        print("stations on published coordinates (no usable OSM match):")
+        print(f"{n_osm} stations from OSM; "
+              f"{len(manual)} on published coordinates (no usable OSM match):")
         for m in manual:
             print("  " + m)

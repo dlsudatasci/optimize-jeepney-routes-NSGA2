@@ -255,6 +255,7 @@ def cost_matrix(network, graph_of_stops, rail: nx.Graph, od_nodes: list,
     n_od = len(od_nodes)
     T = np.full((n_od, n_od), np.inf)
     Mcnt = np.zeros((n_od, n_od), dtype=np.int16)
+    best_gen = np.full((n_od, n_od), np.inf) #  Best generalized cost seen per OD pair. 
 
     def nodes_for(x):
         if _is_rail(x):
@@ -287,7 +288,7 @@ def cost_matrix(network, graph_of_stops, rail: nx.Graph, od_nodes: list,
             if owner == dest:
                 continue
             cost = Drow[k]
-            if not np.isfinite(cost) or cost >= T[owner, dest]:
+            if not np.isfinite(cost) or cost >= best_gen[owner, dest]:
                 continue
             changes = 0
             cur = k
@@ -300,6 +301,7 @@ def cost_matrix(network, graph_of_stops, rail: nx.Graph, od_nodes: list,
                     changes += 1
                 cur = p
                 guard += 1
+            best_gen[owner, dest] = cost
             T[owner, dest] = cost - theta * changes
             Mcnt[owner, dest] = changes
 
