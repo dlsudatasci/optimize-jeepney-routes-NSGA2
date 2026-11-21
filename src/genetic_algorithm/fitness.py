@@ -1,8 +1,15 @@
+from __future__ import annotations
+
 import networkx as nx
 import random
 from genetic_algorithm.schema import Route, Network
-
-from config.config import TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE, STOP_COST, STOP_SIZES, MAX_BUDGET, MAX_DEGREE
+import numpy as np
+from config.config import (
+    TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE,
+    STOP_COST, STOP_SIZES, MAX_BUDGET, MAX_DEGREE,
+    JEEP_TRANSFER_MAX_M, RAIL_TRANSFER_MAX_M, TRANSFER_PENALTY_MIN,
+    CATCHMENT_RADIUS_M, INVALID_NETWORK_COST,
+)
 
 def fitness_score(
     network: Network,
@@ -129,10 +136,106 @@ def fitness_capex_cost(
         capex_cost += fixed_penalty
     return capex_cost
 
-def fitness_user_cost(
-        network: Network
-):
-    return
+"""
+Z_user(R) = sum_o C_o * sum_d [t_od(R) + theta * m_od(R)]
+
+  C_o - population in the walking catchment of origin stop o
+  t_od - in-vehicle travel time from o to d over the multimodal graph (minutes)
+  m_od - number of mode/line changes on the least-cost path
+  theta - fixed transfer penalty
+
+Notes:
+- Walking to and from stops is excluded from t_od
+- Rail is a static trunk layer (utils.rail_layer) composed with the candidate jeepney network by utils.route_layer.
+- Unreachable pairs are charged the worst observed generalised cost plus theta
+Returns user cost (aggregate) or INVALID_NETWORK_COST when the network cannot be scored (e.g. no routes)
+"""
+def fitness_user_cost(network, graph_of_stops, population_gdf,
+                      catchment_m: float = CATCHMENT_RADIUS_M,
+                      theta: float = TRANSFER_PENALTY_MIN,
+                      rail_graph=None,
+                      city: str | None = None,
+                      jeep_transfer_m: float = JEEP_TRANSFER_MAX_M,
+                      rail_transfer_m: float = RAIL_TRANSFER_MAX_M,
+                    ):
+    from utils import route_layer as rl
+    from utils.rail_layer import LINES as _LINES, rail_stations_for
+
+    rail = rail_graph if rail_graph is not None else get_rail_graph()
+
+    if not network.routes:
+        return INVALID_NETWORK_COST, {"n_od": 0, "reach": 0.0}
+
+    od = []
+    seen = set()
+    for route in network.routes:
+        for conn in route.route:
+            if not conn:
+                continue
+            for end in (conn[0], conn[-1]):
+                if end not in seen:
+                    seen.add(end)
+                    od.append(end)
+    n_jeep_od = len(od)
+
+    rail_coords: dict = {}
+    if city is not None:
+        station_xyz = {}
+        for line, info in _LINES.items():
+            for name, la, lo in info["stations"]:
+                station_xyz[(line, name)] = (la, lo)
+        for pair in rail_stations_for(city):
+            if pair in station_xyz and pair not in seen:
+                seen.add(pair)
+                od.append(pair)
+                rail_coords[pair] = station_xyz[pair]
+
+    if not od:
+        return INVALID_NETWORK_COST, {"n_od": 0, "reach": 0.0}
+
+    T, M = rl.cost_matrix(network, graph_of_stops, rail, od, theta=theta,
+                          jeep_transfer_m=jeep_transfer_m,
+                          rail_transfer_m=rail_transfer_m)
+
+    C = origin_population(graph_of_stops, od, population_gdf, catchment_m,
+                          rail_coords=rail_coords)
+    c = np.array([C[n] for n in od], dtype=float)
+
+    if c.sum() <= 0:
+        return INVALID_NETWORK_COST, {"n_od": len(od), "reach": 0.0}
+
+    reachable = np.isfinite(T)
+
+    if not reachable.any():
+        return INVALID_NETWORK_COST, {"n_od": len(od), "reach": 0.0,
+                                      "mean_min": float("nan"),
+                                      "mean_changes": float("nan"),
+                                      "pop_total": float(c.sum()),
+                                      "penalty_min": float("nan")}
+
+    # T excludes theta (route_layer subtracts it per path), so the generalised cost the objective sums is T + theta*M.
+    generalised = T + theta * M
+    finite_gen = generalised[reachable]
+
+    penalty = float(finite_gen.max()) + theta
+    cost = np.where(reachable, generalised, penalty)
+
+    z = float((c[:, None] * cost).sum())
+
+    details = {
+        "n_od": len(od),
+        "n_jeep_od": n_jeep_od,
+        "n_rail_od": len(od) - n_jeep_od,
+        "reach": float(reachable.mean()),
+        "n_unreachable": int((~reachable).sum()),
+        "mean_min": float(T[reachable].mean()),
+        "mean_changes": float(M[reachable].mean()),
+        "mean_generalised_min": float(finite_gen.mean()),
+        "pop_total": float(c.sum()),
+        "pop_rail": float(c[n_jeep_od:].sum()),
+        "penalty_min": penalty,
+    }
+    return z, details
 
 # map stop size by number of degrees, return size of stop based on its stop class
 def get_stop_area(network, stop, stop_sizes, max_degree):
@@ -439,6 +542,58 @@ def normalize_vul_rob(vul_rob, q_c):
     # because R' = (1/N) * sum s(q), and each s(q) <= 1.
     return 0.0 if q_c <= 0 else vul_rob / q_c
 
+_RAIL_CACHE: dict = {}
+
+
+def get_rail_graph():
+    """Build and cache the static rail trunk graph."""
+    if "rail" not in _RAIL_CACHE:
+        from utils.route_layer import build_rail_graph
+        _RAIL_CACHE["rail"] = build_rail_graph()
+    return _RAIL_CACHE["rail"]
+
+
+def origin_population(graph_of_stops, route_nodes, population_gdf,
+                      catchment_m: float,
+                      rail_coords: dict | None = None) -> dict:
+    # C_o: population within ``catchment_m`` of each origin.
+    # Uses a bounding-box reject followed by a haversine test
+    lon = population_gdf["longitude"].to_numpy()
+    lat = population_gdf["latitude"].to_numpy()
+    pop = population_gdf["phl_general_2020"].to_numpy()
+
+    # degrees per metre, scaled for latitude (1deg = ~111,320m)
+    dlat = catchment_m / 111_320.0
+    coslat = np.cos(np.radians(np.mean(lat)))
+    dlon = catchment_m / (111_320.0 * max(coslat, 1e-6))
+
+    rail_coords = rail_coords or {}
+    C = {}
+    for n in route_nodes:
+        if n in rail_coords:
+            y, x = rail_coords[n]
+        else:
+            d = graph_of_stops.nodes.get(n)
+            if d is None:
+                C[n] = 0.0
+                continue
+            y, x = d.get("y", d.get("lat")), d.get("x", d.get("lon"))
+        if y is None or x is None:
+            C[n] = 0.0
+            continue
+        box = (
+            (lon >= x - dlon) & (lon <= x + dlon)
+            & (lat >= y - dlat) & (lat <= y + dlat)
+        )
+        if not box.any():
+            C[n] = 0.0
+            continue
+        dx = (lon[box] - x) * 111_320.0 * coslat
+        dy = (lat[box] - y) * 111_320.0
+        inside = (dx * dx + dy * dy) <= catchment_m * catchment_m
+        C[n] = float(pop[box][inside].sum())
+    return C
+
 def _fitness_score(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len):
     internal_connectivity, internal_details = compute_internal_connectivity(
         network,
@@ -551,9 +706,9 @@ def _pct_tag(w):
 
 def make_run_tag(weights):
     return (
-        f"cov{_pct_tag(weights["w_cov"])}"
-        f"_int{_pct_tag(weights["w_int"])}"
-        f"_ext{_pct_tag(weights["w_ext"])}"
-        f"_vul{_pct_tag(weights["w_vul"])}"
-        f"_rob{_pct_tag(weights["w_rob"])}"
+        f"cov{_pct_tag(weights['w_cov'])}"
+        f"_int{_pct_tag(weights['w_int'])}"
+        f"_ext{_pct_tag(weights['w_ext'])}"
+        f"_vul{_pct_tag(weights['w_vul'])}"
+        f"_rob{_pct_tag(weights['w_rob'])}"
     )
