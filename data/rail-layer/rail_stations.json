@@ -1,0 +1,384 @@
+{
+  "_meta": {
+    "source": "OpenStreetMap via Overpass API",
+    "matching": "name match, rejected when inter-station hop is implausible",
+    "bbox": [
+      14.4,
+      120.9,
+      14.75,
+      121.2
+    ],
+    "hop_bounds_km": [
+      0.35,
+      3.2
+    ],
+    "extracted": "2026-11-22",
+    "osm_count": 48,
+    "manual_count": 3
+  },
+  "lines": {
+    "MRT-3": [
+      {
+        "name": "North Avenue",
+        "lat": 14.6576297,
+        "lon": 121.0362911,
+        "source": "osm",
+        "osm": "node/13565942044"
+      },
+      {
+        "name": "Quezon Avenue",
+        "lat": 14.6458965,
+        "lon": 121.0369547,
+        "source": "osm",
+        "osm": "node/13565942045"
+      },
+      {
+        "name": "GMA Kamuning",
+        "lat": 14.6353465,
+        "lon": 121.0432937,
+        "source": "osm",
+        "osm": "way/30262758"
+      },
+      {
+        "name": "Araneta Center Cubao",
+        "lat": 14.6228614,
+        "lon": 121.0531248,
+        "source": "osm",
+        "osm": "way/184582280"
+      },
+      {
+        "name": "Santolan-Annapolis",
+        "lat": 14.6078561,
+        "lon": 121.056524,
+        "source": "osm",
+        "osm": "way/95496202"
+      },
+      {
+        "name": "Ortigas",
+        "lat": 14.587862,
+        "lon": 121.0567162,
+        "source": "osm",
+        "osm": "way/60194145"
+      },
+      {
+        "name": "Shaw Boulevard",
+        "lat": 14.5810649,
+        "lon": 121.0534794,
+        "source": "osm",
+        "osm": "node/11329697352"
+      },
+      {
+        "name": "Boni",
+        "lat": 14.5737744,
+        "lon": 121.0481887,
+        "source": "osm",
+        "osm": "way/60198083"
+      },
+      {
+        "name": "Guadalupe",
+        "lat": 14.567114,
+        "lon": 121.0455357,
+        "source": "osm",
+        "osm": "way/60618740"
+      },
+      {
+        "name": "Buendia",
+        "lat": 14.5543705,
+        "lon": 121.0342223,
+        "source": "osm",
+        "osm": "way/112320439"
+      },
+      {
+        "name": "Ayala",
+        "lat": 14.549194,
+        "lon": 121.027919,
+        "source": "osm",
+        "osm": "way/27663063"
+      },
+      {
+        "name": "Magallanes",
+        "lat": 14.5419448,
+        "lon": 121.0193919,
+        "source": "osm",
+        "osm": "way/222628890"
+      },
+      {
+        "name": "Taft Avenue",
+        "lat": 14.5375644,
+        "lon": 121.0018185,
+        "source": "osm",
+        "osm": "way/222628889"
+      }
+    ],
+    "LRT-1": [
+      {
+        "name": "Fernando Poe Jr.",
+        "lat": 14.657559,
+        "lon": 121.0211373,
+        "source": "osm",
+        "osm": "way/402882918"
+      },
+      {
+        "name": "Balintawak",
+        "lat": 14.6574243,
+        "lon": 121.0038959,
+        "source": "osm",
+        "osm": "way/402882917"
+      },
+      {
+        "name": "Monumento",
+        "lat": 14.6543118,
+        "lon": 120.9838745,
+        "source": "osm",
+        "osm": "way/288086841"
+      },
+      {
+        "name": "5th Avenue",
+        "lat": 14.6444062,
+        "lon": 120.9835359,
+        "source": "osm",
+        "osm": "way/288086563"
+      },
+      {
+        "name": "R. Papa",
+        "lat": 14.6360145,
+        "lon": 120.9822793,
+        "source": "osm",
+        "osm": "way/288087278"
+      },
+      {
+        "name": "Abad Santos",
+        "lat": 14.6306063,
+        "lon": 120.9814053,
+        "source": "osm",
+        "osm": "way/288085512"
+      },
+      {
+        "name": "Blumentritt",
+        "lat": 14.6227714,
+        "lon": 120.9828989,
+        "source": "osm",
+        "osm": "way/288085179"
+      },
+      {
+        "name": "Tayuman",
+        "lat": 14.6166999,
+        "lon": 120.9827228,
+        "source": "osm",
+        "osm": "way/288010747"
+      },
+      {
+        "name": "Bambang",
+        "lat": 14.6111147,
+        "lon": 120.9824669,
+        "source": "osm",
+        "osm": "way/187134601"
+      },
+      {
+        "name": "Doroteo Jose",
+        "lat": 14.6052943,
+        "lon": 120.9820514,
+        "source": "osm",
+        "osm": "way/112644274"
+      },
+      {
+        "name": "Carriedo",
+        "lat": 14.5991704,
+        "lon": 120.9813635,
+        "source": "osm",
+        "osm": "way/288089644"
+      },
+      {
+        "name": "Central Terminal",
+        "lat": 14.5927962,
+        "lon": 120.9816199,
+        "source": "osm",
+        "osm": "way/179251377"
+      },
+      {
+        "name": "United Nations",
+        "lat": 14.5875,
+        "lon": 120.9834,
+        "source": "manual",
+        "osm": null
+      },
+      {
+        "name": "Pedro Gil",
+        "lat": 14.5765754,
+        "lon": 120.9880197,
+        "source": "osm",
+        "osm": "way/288126519"
+      },
+      {
+        "name": "Quirino",
+        "lat": 14.5702879,
+        "lon": 120.9915257,
+        "source": "osm",
+        "osm": "way/288126517"
+      },
+      {
+        "name": "Vito Cruz",
+        "lat": 14.5634699,
+        "lon": 120.9947509,
+        "source": "osm",
+        "osm": "way/288126518"
+      },
+      {
+        "name": "Gil Puyat",
+        "lat": 14.5541814,
+        "lon": 120.9971661,
+        "source": "osm",
+        "osm": "way/288127159"
+      },
+      {
+        "name": "Libertad",
+        "lat": 14.5477514,
+        "lon": 120.9986373,
+        "source": "osm",
+        "osm": "way/290088413"
+      },
+      {
+        "name": "EDSA",
+        "lat": 14.5388434,
+        "lon": 121.0006192,
+        "source": "osm",
+        "osm": "way/222628891"
+      },
+      {
+        "name": "Baclaran",
+        "lat": 14.5342877,
+        "lon": 120.998398,
+        "source": "osm",
+        "osm": "way/290189159"
+      },
+      {
+        "name": "Redemptorist",
+        "lat": 14.53028,
+        "lon": 120.99294,
+        "source": "manual",
+        "osm": null
+      },
+      {
+        "name": "MIA Road",
+        "lat": 14.5184318,
+        "lon": 120.9929872,
+        "source": "osm",
+        "osm": "way/797744977"
+      },
+      {
+        "name": "PITX",
+        "lat": 14.5083101,
+        "lon": 120.9912791,
+        "source": "osm",
+        "osm": "way/586033800"
+      },
+      {
+        "name": "Ninoy Aquino Avenue",
+        "lat": 14.4988903,
+        "lon": 120.9943732,
+        "source": "osm",
+        "osm": "way/798212098"
+      },
+      {
+        "name": "Dr Santos",
+        "lat": 14.4852337,
+        "lon": 120.9895723,
+        "source": "osm",
+        "osm": "way/923624587"
+      }
+    ],
+    "LRT-2": [
+      {
+        "name": "Recto",
+        "lat": 14.6035073,
+        "lon": 120.9833708,
+        "source": "osm",
+        "osm": "way/179240108"
+      },
+      {
+        "name": "Legarda",
+        "lat": 14.600877,
+        "lon": 120.9925686,
+        "source": "osm",
+        "osm": "way/28788659"
+      },
+      {
+        "name": "Pureza",
+        "lat": 14.6016769,
+        "lon": 121.0050939,
+        "source": "osm",
+        "osm": "way/188168854"
+      },
+      {
+        "name": "V. Mapa",
+        "lat": 14.6043,
+        "lon": 121.0172,
+        "source": "manual",
+        "osm": null
+      },
+      {
+        "name": "J. Ruiz",
+        "lat": 14.6105686,
+        "lon": 121.0260986,
+        "source": "osm",
+        "osm": "way/188168853"
+      },
+      {
+        "name": "Gilmore",
+        "lat": 14.6135362,
+        "lon": 121.0341458,
+        "source": "osm",
+        "osm": "way/188169761"
+      },
+      {
+        "name": "Betty Go-Belmonte",
+        "lat": 14.6185972,
+        "lon": 121.042706,
+        "source": "osm",
+        "osm": "way/113358959"
+      },
+      {
+        "name": "Araneta Center Cubao",
+        "lat": 14.6194837,
+        "lon": 121.0510726,
+        "source": "osm",
+        "osm": "node/11329697351"
+      },
+      {
+        "name": "Anonas",
+        "lat": 14.6266989,
+        "lon": 121.0644826,
+        "source": "osm",
+        "osm": "node/13478815690"
+      },
+      {
+        "name": "Katipunan",
+        "lat": 14.6310644,
+        "lon": 121.0727741,
+        "source": "osm",
+        "osm": "node/5377269277"
+      },
+      {
+        "name": "Santolan",
+        "lat": 14.6221076,
+        "lon": 121.0859641,
+        "source": "osm",
+        "osm": "way/30411347"
+      },
+      {
+        "name": "Marikina-Pasig",
+        "lat": 14.6204412,
+        "lon": 121.1006479,
+        "source": "osm",
+        "osm": "way/513224845"
+      },
+      {
+        "name": "Antipolo",
+        "lat": 14.6247704,
+        "lon": 121.121309,
+        "source": "osm",
+        "osm": "way/576938325"
+      }
+    ]
+  }
+}
