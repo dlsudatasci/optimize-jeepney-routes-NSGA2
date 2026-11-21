@@ -1,4 +1,4 @@
-"""Unit tests for ``mutate`` in ``src/genetic_operators.py``.
+"""Unit tests for ``mutate`` in ``src/genetic_algorithm/mutate.py``.
 
 Specification under test. ``mutate`` rewires one interior stop of one route of
 a network, in place:
@@ -27,9 +27,9 @@ import copy
 import networkx as nx
 import pytest
 
-import genetic_algorithm.genetic_operators as genetic_operators
+import genetic_algorithm.mutate as genetic_operators
 from config.config import MAX_DISTANCE
-from genetic_algorithm.genetic_operators import mutate
+from genetic_algorithm.mutate import mutate
 from genetic_algorithm.schema import Network, Route
 
 # Stops on a north-south line about 1.11 km apart, plus candidates off it.
