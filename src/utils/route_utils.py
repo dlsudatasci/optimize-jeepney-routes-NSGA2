@@ -56,7 +56,7 @@ def disable_surrounding_nodes(nodes: list[Stop], source_node: Stop, max_distance
     for node in nodes:
         n_lat = node.lat
         n_lon = node.long
-        distance_to_source = haversine((s_lat, s_lon), (n_lat, n_lon)).meters
+        distance_to_source = haversine((s_lat, s_lon), (n_lat, n_lon)) * 1000
         if distance_to_source <= max_distance or distance_to_source > max_radius:
             node.disable()
 

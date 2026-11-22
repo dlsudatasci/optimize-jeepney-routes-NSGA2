@@ -127,7 +127,7 @@ def measured_length_km(line: str) -> float:
     """Straight-line total along the line, before curvature correction."""
     st = LINES[line]["stations"]
     return sum(
-        haversine(la, loa, lb, lob)
+        haversine((la, loa), (lb, lob))
         for (_, la, loa), (_, lb, lob) in itertools.pairwise(st)
     )
 
@@ -147,7 +147,7 @@ def line_segments(line: str):
     st = LINES[line]["stations"]
     factor = route_factor(line)
     for (na, la, loa), (nb, lb, lob) in itertools.pairwise(st):
-        yield na, nb, haversine(la, loa, lb, lob) * factor
+        yield na, nb, haversine((la, loa), (lb, lob)) * factor
 
 
 def total_length_km(line: str) -> float:
