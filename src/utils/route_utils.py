@@ -1,22 +1,11 @@
-from geopy.distance import geodesic
+from math import asin, cos, exp, radians, sin, sqrt
+
 import numpy as np
-import math
+from geopy.distance import geodesic
 from scipy.spatial.distance import euclidean
 
 from genetic_algorithm.schema import Stop
 
-def add_stops_to_list(routes):
-    used_stops = []
-    for route in routes:
-        if route is None:
-            continue
-
-        for conn in route.route:
-            if conn[0] not in used_stops:
-                used_stops.append(conn[0])
-            if conn[-1] not in used_stops:
-                used_stops.append(conn[-1])
-    return used_stops
 
 def add_points_to_graph(graph, graph_to_add):
     for node_key, node_data in graph.nodes.items():
@@ -45,7 +34,7 @@ def get_edge_probability(source: Stop, destination: Stop, normalization_factor, 
     source_coord = [source.lat, source.long]
     dest_coord = [destination.lat, destination.long]
 
-    base_prob = math.exp(-(euclidean(source_coord, dest_coord))) / float(normalization_factor)
+    base_prob = exp(-(euclidean(source_coord, dest_coord))) / float(normalization_factor)
 
     # If there is already an existing edge between source and destination, decrease the probability
     if network_graph.has_edge(source.stop_id, destination.stop_id):
@@ -85,3 +74,11 @@ def degrees_to_meters(angle_degrees):
 
 def meters_to_degrees(distance_meters):
     return distance_meters / METERS_PER_DEGREE
+
+EARTH_RADIUS_KM = 6371.0088  # mean earth radius
+
+def haversine(point1, point2):
+  lat1, lon1 = radians(point1[0]), radians(point1[1])
+  lat2, lon2 = radians(point2[0]), radians(point2[1])
+  a = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
+  return 2 * EARTH_RADIUS_KM * asin(min(1.0, sqrt(a)))

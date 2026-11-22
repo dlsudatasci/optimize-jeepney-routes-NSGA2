@@ -3,6 +3,7 @@ from geopy.distance import geodesic
 
 from genetic_algorithm.schema import Route
 
+
 # Iterate through each node in reverse and get the shortest path
 def get_reverse_route(route: Route, graph_of_stops, nodes_yx):
     paths = route.route

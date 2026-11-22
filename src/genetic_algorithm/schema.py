@@ -49,14 +49,14 @@ class Network:
 class HyperParameters:
   fitness_weights: dict
   walk_distance: int
-  n_transport_nodes: int
+  elitism_rate: float = 0.1
+  selection_rate: float = 0.10
   mutation_probability: float = 0.2
   mutations_per_child: Sequence[float] = (0.1, 0.1, 0.4, 0.2, 0.2)
   mutations_per_child_identical: Sequence[float] = (0.0, 0.1, 0.4, 0.3, 0.2)
   plateau_threshold: float = 1e-11
   plateau_count_limit: int = 10_000
   max_generations: int = 50_000
-  selection_fraction: float = 0.10
   checkpoint_every: int = 10
 
   @classmethod

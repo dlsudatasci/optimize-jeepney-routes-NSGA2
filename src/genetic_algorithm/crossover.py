@@ -53,8 +53,8 @@ def crossover(network1: Network, network2: Network, graph_of_stops: nx.MultiDiGr
           u = connection[0]
           v = connection[-1]
 
-          u_data = src_graph.nodes[u] if u in src_graph else (graph_of_stops.nodes[u] if graph_of_stops and u in graph_of_stops else {})
-          v_data = src_graph.nodes[v] if v in src_graph else (graph_of_stops.nodes[v] if graph_of_stops and v in graph_of_stops else {})
+          u_data = graph_of_stops.nodes[u] if u in graph_of_stops else src_graph.nodes.get(u, {})
+          v_data = graph_of_stops.nodes[v] if v in graph_of_stops else src_graph.nodes.get(v, {})
 
           child_graph.add_node(u, **u_data)
           child_graph.add_node(v, **v_data)
