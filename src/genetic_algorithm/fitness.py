@@ -18,13 +18,15 @@ def fitness_score(
     total_network_distance,
     allowed_edge,
     edge_len,
+    graph_of_stops: nx.MultiDiGraph,
+    population_gdf,
     stop_cost: int = STOP_COST,
     stop_sizes: list[float] = STOP_SIZES,
     max_degree: list[int] = MAX_DEGREE,
-    max_budget: int = MAX_BUDGET
+    max_budget: int = MAX_BUDGET,
 ):
     network_scores = []
-    # network_scores.append(fitness_user_cost(network)))
+    network_scores.append(fitness_user_cost(network, graph_of_stops, population_gdf))
     network_scores.append(fitness_network_efficiency(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len))
     network_scores.append(fitness_capex_cost(network, stop_cost, stop_sizes, max_degree, max_budget))
     return network_scores
@@ -164,7 +166,7 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
     rail = rail_graph if rail_graph is not None else get_rail_graph()
 
     if not network.routes:
-        return INVALID_NETWORK_COST, {"n_od": 0, "reach": 0.0}
+        return INVALID_NETWORK_COST #, {"n_od": 0, "reach": 0.0}
 
     od = []
     seen = set()
@@ -191,7 +193,7 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
                 rail_coords[pair] = station_xyz[pair]
 
     if not od:
-        return INVALID_NETWORK_COST, {"n_od": 0, "reach": 0.0}
+        return INVALID_NETWORK_COST #, {"n_od": 0, "reach": 0.0}
 
     T, M = rl.cost_matrix(network, graph_of_stops, rail, od, theta=theta,
                           jeep_transfer_m=jeep_transfer_m,
@@ -207,11 +209,11 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
     reachable = np.isfinite(T)
 
     if not reachable.any():
-        return INVALID_NETWORK_COST, {"n_od": len(od), "reach": 0.0,
-                                      "mean_min": float("nan"),
-                                      "mean_changes": float("nan"),
-                                      "pop_total": float(c.sum()),
-                                      "penalty_min": float("nan")}
+        return INVALID_NETWORK_COST #, {"n_od": len(od), "reach": 0.0,
+                                    #   "mean_min": float("nan"),
+                                    #   "mean_changes": float("nan"),
+                                    #   "pop_total": float(c.sum()),
+                                    #   "penalty_min": float("nan")}
 
     # T excludes theta (route_layer subtracts it per path), so the generalised cost the objective sums is T + theta*M.
     generalised = T + theta * M
@@ -222,20 +224,20 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
 
     z = float((c[:, None] * cost).sum())
 
-    details = {
-        "n_od": len(od),
-        "n_jeep_od": n_jeep_od,
-        "n_rail_od": len(od) - n_jeep_od,
-        "reach": float(reachable.mean()),
-        "n_unreachable": int((~reachable).sum()),
-        "mean_min": float(T[reachable].mean()),
-        "mean_changes": float(M[reachable].mean()),
-        "mean_generalised_min": float(finite_gen.mean()),
-        "pop_total": float(c.sum()),
-        "pop_rail": float(c[n_jeep_od:].sum()),
-        "penalty_min": penalty,
-    }
-    return z, details
+    # details = {
+    #     "n_od": len(od),
+    #     "n_jeep_od": n_jeep_od,
+    #     "n_rail_od": len(od) - n_jeep_od,
+    #     "reach": float(reachable.mean()),
+    #     "n_unreachable": int((~reachable).sum()),
+    #     "mean_min": float(T[reachable].mean()),
+    #     "mean_changes": float(M[reachable].mean()),
+    #     "mean_generalised_min": float(finite_gen.mean()),
+    #     "pop_total": float(c.sum()),
+    #     "pop_rail": float(c[n_jeep_od:].sum()),
+    #     "penalty_min": penalty,
+    # }
+    return z
 
 # map stop size by number of degrees, return size of stop based on its stop class
 def get_stop_area(network, stop, stop_sizes, max_degree):
