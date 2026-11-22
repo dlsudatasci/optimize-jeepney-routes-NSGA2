@@ -2,17 +2,19 @@
 Metro Manila rail trunk network for use in City Zone Creation / NSGA-II.
 
 Operational lines as of 2026 only.
-Station coordinates are read from ``data/rail-layer/rail_stations.json``
+Station coordinates are read from ``data/rail_layer/rail_stations.json``
 """
 
 from __future__ import annotations
 
+import itertools
 import json
-import math
 from pathlib import Path
 
+from utils.route_utils import haversine
+
 RAIL_STATIONS_PATH = (
-    Path(__file__).resolve().parents[2] / "data" / "rail-layer" / "rail_stations.json"
+    Path(__file__).resolve().parents[2] / "data" / "rail_layer" / "rail_stations.json"
 )
 
 # Average commercial speed (km/h) including station dwell. Published end-to-end
@@ -23,7 +25,7 @@ LINE_SPEED_KPH = {
     "LRT-2": 32.0,
 }
 
-# Operator-published line lengths (km). 
+# Operator-published line lengths (km).
 # line_segments scales by published_length / measured_length per line.
 LINE_LENGTH_KM = {
     "MRT-3": 16.9,
@@ -52,11 +54,11 @@ STATION_ORDER = {
     ],
 }
 
-# fixed transfers 
+# fixed transfers
 RAIL_INTERCHANGES = [
-    (("LRT-1", "Doroteo Jose"), ("LRT-2", "Recto")),             
+    (("LRT-1", "Doroteo Jose"), ("LRT-2", "Recto")),
     (("MRT-3", "Araneta Center Cubao"), ("LRT-2", "Araneta Center Cubao")),
-    (("LRT-1", "EDSA"), ("MRT-3", "Taft Avenue")),               
+    (("LRT-1", "EDSA"), ("MRT-3", "Taft Avenue")),
 ]
 
 # stations within city bounds as of 2026
@@ -94,15 +96,6 @@ def rail_stations_for(city: str) -> list[tuple[str, str]]:
     return CITY_RAIL_STATIONS.get(city, [])
 
 
-def haversine_km(lat1, lon1, lat2, lon2) -> float:
-    r = 6371.0088
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = p2 - p1
-    dl = math.radians(lon2 - lon1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * r * math.asin(math.sqrt(a))
-
-
 def _load_stations(path: Path | None = None) -> dict[str, list[tuple[str, float, float]]]:
     """Read the OSM-derived station file and return ``{line: [(name, lat, lon)]}``."""
     p = Path(path) if path is not None else RAIL_STATIONS_PATH
@@ -134,8 +127,8 @@ def measured_length_km(line: str) -> float:
     """Straight-line total along the line, before curvature correction."""
     st = LINES[line]["stations"]
     return sum(
-        haversine_km(la, loa, lb, lob)
-        for (_, la, loa), (_, lb, lob) in zip(st, st[1:])
+        haversine(la, loa, lb, lob)
+        for (_, la, loa), (_, lb, lob) in itertools.pairwise(st)
     )
 
 
@@ -153,8 +146,8 @@ def line_segments(line: str):
     """
     st = LINES[line]["stations"]
     factor = route_factor(line)
-    for (na, la, loa), (nb, lb, lob) in zip(st, st[1:]):
-        yield na, nb, haversine_km(la, loa, lb, lob) * factor
+    for (na, la, loa), (nb, lb, lob) in itertools.pairwise(st):
+        yield na, nb, haversine(la, loa, lb, lob) * factor
 
 
 def total_length_km(line: str) -> float:

@@ -1,11 +1,11 @@
 import networkx as nx
-from geopy.distance import geodesic
 
 from genetic_algorithm.schema import Route
+from utils.route_utils import haversine
 
 
 # Iterate through each node in reverse and get the shortest path
-def get_reverse_route(route: Route, graph_of_stops, nodes_yx):
+def get_reverse_route(route: Route, graph_of_stops, partner_edges, nodes_yx):
     paths = route.route
     reverse_paths = paths[::-1]
     reverse_route_list = []
@@ -23,13 +23,13 @@ def get_reverse_route(route: Route, graph_of_stops, nodes_yx):
         # Getting the edges of the start node only for the first connection
         if reverse_paths.index(connection) == 0:
             start_node = reverse_route_path[0] # Start node is critical as it should be the same as the last stop previous connection (If this is not the first connection)
-            new_start_node = get_opposite_side_stop(start_node, graph_of_stops)
+            new_start_node = get_opposite_side_stop(start_node, graph_of_stops, partner_edges)
             if new_start_node is not None:
                 start_node = new_start_node
             used_stops.append(start_node)
 
         # Getting the edges of the end node
-        new_end_node = get_opposite_side_stop(end_node, graph_of_stops)
+        new_end_node = get_opposite_side_stop(end_node, graph_of_stops, partner_edges)
         if new_end_node is not None:
             end_node = new_end_node
 
@@ -58,36 +58,35 @@ def get_reverse_route(route: Route, graph_of_stops, nodes_yx):
         for i in range(len(reverse_route)-1):
             ay, ax = nodes_yx[reverse_route[i]]
             by, bx = nodes_yx[reverse_route[i+1]]
-            distance_travelled += geodesic((ay, ax), (by, bx)).kilometers
+            distance_travelled += haversine((ay, ax), (by, bx)).kilometers
 
         total_distance += distance_travelled
 
     return Route(reverse_route_list, reverse_route_id, total_distance, route.line_id, direction="reverse")
 
 # Checking the edges -> This is to see if the stop is in a one-way route
-def get_opposite_side_stop(node, graph_of_stops, partner_edges=None):
-    # TODO: partner_edges comes from the notebook right now, graph_of_stops contains it
-    if partner_edges is None:
-        partner_edges = graph_of_stops.graph.get('partner_edges', {})
+def get_opposite_side_stop(node, graph_of_stops, partner_edges):
+  out_edges = list(graph_of_stops.out_edges(node, keys=True, data=True))
 
-    out_edges = list(graph_of_stops.out_edges(node, keys=True, data=True))
-    if not out_edges:
-        return None
-    n1,n2,key,data = out_edges[0]
-    opposite_node = None
+  if not out_edges:
+    return None
 
-    eid = data.get('edge_id')
-    if eid is None:
-        return None
-    if eid in partner_edges:
-        partner_edge_id = partner_edges[eid]
-        for u, v, k, road in graph_of_stops.edges(keys=True, data=True):
-            if road['edge_id'] == partner_edge_id:
-                if u < 100000:
-                    opposite_node = u
-                    break
-                if v < 100000:
-                    opposite_node = v
-                    break
+  _,_,_,data = out_edges[0]
+  opposite_node = None
 
-    return opposite_node
+  eid = data.get('edge_id')
+  if eid is None:
+    return None
+
+  if eid in partner_edges:
+    partner_edge_id = partner_edges[eid]
+    for u, v, k, road in graph_of_stops.edges(keys=True, data=True):
+      if road['edge_id'] == partner_edge_id:
+        if u < 100000:
+          opposite_node = u
+          break
+        if v < 100000:
+          opposite_node = v
+          break
+
+  return opposite_node

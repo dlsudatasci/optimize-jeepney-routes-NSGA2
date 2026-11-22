@@ -1,7 +1,6 @@
 from math import asin, cos, exp, radians, sin, sqrt
 
 import numpy as np
-from geopy.distance import geodesic
 from scipy.spatial.distance import euclidean
 
 from genetic_algorithm.schema import Stop
@@ -57,7 +56,7 @@ def disable_surrounding_nodes(nodes: list[Stop], source_node: Stop, max_distance
     for node in nodes:
         n_lat = node.lat
         n_lon = node.long
-        distance_to_source = geodesic((s_lat, s_lon), (n_lat, n_lon)).meters
+        distance_to_source = haversine((s_lat, s_lon), (n_lat, n_lon)).meters
         if distance_to_source <= max_distance or distance_to_source > max_radius:
             node.disable()
 
@@ -82,3 +81,8 @@ def haversine(point1, point2):
   lat2, lon2 = radians(point2[0]), radians(point2[1])
   a = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
   return 2 * EARTH_RADIUS_KM * asin(min(1.0, sqrt(a)))
+
+def make_run_tag(walk_distance, stop_min, route_amt, n_networks):
+  return (
+    f"_w{int(walk_distance)}_s{stop_min}_r{route_amt}_n{n_networks}"
+  )
