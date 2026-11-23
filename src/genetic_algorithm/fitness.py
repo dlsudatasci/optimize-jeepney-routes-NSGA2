@@ -173,11 +173,21 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
                       city: str | None = None,
                       jeep_transfer_m: float = JEEP_TRANSFER_MAX_M,
                       rail_transfer_m: float = RAIL_TRANSFER_MAX_M,
+                      return_details: bool = False,
                     ):
+    # Every exit goes through out(). By default it hands back the objective on
+    # its own, which is what fitness_score appends and what NSGA ranks, so the
+    # GA path is unchanged. return_details=True adds the diagnostics dict, and
+    # is what the EDA baseline asks for -- before this, the success path
+    # returned a bare float while one failure path returned a 2-tuple, so a
+    # caller that unpacked the result worked only when the network was broken.
+    def out(cost, **details):
+        return (cost, details) if return_details else cost
+
     rail = rail_graph if rail_graph is not None else get_rail_graph()
 
     if not network.routes:
-        return INVALID_NETWORK_COST #, {"n_od": 0, "reach": 0.0}
+        return out(INVALID_NETWORK_COST, n_od=0, reach=0.0)
 
     od = []
     seen = set()
@@ -189,6 +199,8 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
                 if end not in seen:
                     seen.add(end)
                     od.append(end)
+
+    n_jeep_od = len(od)
 
     rail_coords: dict = {}
     if city is not None:
@@ -203,7 +215,7 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
                 rail_coords[pair] = station_xyz[pair]
 
     if not od:
-        return INVALID_NETWORK_COST #, {"n_od": 0, "reach": 0.0}
+        return out(INVALID_NETWORK_COST, n_od=0, reach=0.0)
 
     T, M = rl.cost_matrix(network, graph_of_stops, rail, od, theta=theta,
                           jeep_transfer_m=jeep_transfer_m,
@@ -214,16 +226,13 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
     c = np.array([C[n] for n in od], dtype=float)
 
     if c.sum() <= 0:
-        return INVALID_NETWORK_COST, {"n_od": len(od), "reach": 0.0}
+        return out(INVALID_NETWORK_COST, n_od=len(od), reach=0.0)
 
     reachable = np.isfinite(T)
 
     if not reachable.any():
-        return INVALID_NETWORK_COST #, {"n_od": len(od), "reach": 0.0,
-                                    #   "mean_min": float("nan"),
-                                    #   "mean_changes": float("nan"),
-                                    #   "pop_total": float(c.sum()),
-                                    #   "penalty_min": float("nan")}
+        return out(INVALID_NETWORK_COST, n_od=len(od), reach=0.0,
+                   pop_total=float(c.sum()))
 
     # T excludes theta (route_layer subtracts it per path), so the generalised cost the objective sums is T + theta*M.
     generalised = T + theta * M
@@ -234,20 +243,20 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
 
     z = float((c[:, None] * cost).sum())
 
-    # details = {
-    #     "n_od": len(od),
-    #     "n_jeep_od": n_jeep_od,
-    #     "n_rail_od": len(od) - n_jeep_od,
-    #     "reach": float(reachable.mean()),
-    #     "n_unreachable": int((~reachable).sum()),
-    #     "mean_min": float(T[reachable].mean()),
-    #     "mean_changes": float(M[reachable].mean()),
-    #     "mean_generalised_min": float(finite_gen.mean()),
-    #     "pop_total": float(c.sum()),
-    #     "pop_rail": float(c[n_jeep_od:].sum()),
-    #     "penalty_min": penalty,
-    # }
-    return z
+    return out(
+        z,
+        n_od=len(od),
+        n_jeep_od=n_jeep_od,
+        n_rail_od=len(od) - n_jeep_od,
+        reach=float(reachable.mean()),
+        n_unreachable=int((~reachable).sum()),
+        mean_min=float(T[reachable].mean()),
+        mean_changes=float(M[reachable].mean()),
+        mean_generalised_min=float(finite_gen.mean()),
+        pop_total=float(c.sum()),
+        pop_rail=float(c[n_jeep_od:].sum()),
+        penalty_min=penalty,
+    )
 
 # map stop size by number of degrees, return size of stop based on its stop class
 def get_stop_area(network, stop, stop_sizes, max_degree):
