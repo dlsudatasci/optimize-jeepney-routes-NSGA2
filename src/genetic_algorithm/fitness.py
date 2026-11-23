@@ -173,6 +173,90 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
                       city: str | None = None,
                       jeep_transfer_m: float = JEEP_TRANSFER_MAX_M,
                       rail_transfer_m: float = RAIL_TRANSFER_MAX_M,
+                    ):
+    rail = rail_graph if rail_graph is not None else get_rail_graph()
+
+    if not network.routes:
+        return INVALID_NETWORK_COST #, {"n_od": 0, "reach": 0.0}
+
+    od = []
+    seen = set()
+    for route in network.routes:
+        for conn in route.route:
+            if not conn:
+                continue
+            for end in (conn[0], conn[-1]):
+                if end not in seen:
+                    seen.add(end)
+                    od.append(end)
+
+    rail_coords: dict = {}
+    if city is not None:
+        station_xyz = {}
+        for line, info in _LINES.items():
+            for name, la, lo in info["stations"]:
+                station_xyz[(line, name)] = (la, lo)
+        for pair in rail_stations_for(city):
+            if pair in station_xyz and pair not in seen:
+                seen.add(pair)
+                od.append(pair)
+                rail_coords[pair] = station_xyz[pair]
+
+    if not od:
+        return INVALID_NETWORK_COST #, {"n_od": 0, "reach": 0.0}
+
+    T, M = rl.cost_matrix(network, graph_of_stops, rail, od, theta=theta,
+                          jeep_transfer_m=jeep_transfer_m,
+                          rail_transfer_m=rail_transfer_m)
+
+    C = origin_population(graph_of_stops, od, population_gdf, catchment_m,
+                          rail_coords=rail_coords)
+    c = np.array([C[n] for n in od], dtype=float)
+
+    if c.sum() <= 0:
+        return INVALID_NETWORK_COST #, {"n_od": len(od), "reach": 0.0}
+
+    reachable = np.isfinite(T)
+
+    if not reachable.any():
+        return INVALID_NETWORK_COST #, {"n_od": len(od), "reach": 0.0,
+                                    #   "mean_min": float("nan"),
+                                    #   "mean_changes": float("nan"),
+                                    #   "pop_total": float(c.sum()),
+                                    #   "penalty_min": float("nan")}
+
+    # T excludes theta (route_layer subtracts it per path), so the generalised cost the objective sums is T + theta*M.
+    generalised = T + theta * M
+    finite_gen = generalised[reachable]
+
+    penalty = float(finite_gen.max()) + theta
+    cost = np.where(reachable, generalised, penalty)
+
+    z = float((c[:, None] * cost).sum())
+
+    # details = {
+    #     "n_od": len(od),
+    #     "n_jeep_od": n_jeep_od,
+    #     "n_rail_od": len(od) - n_jeep_od,
+    #     "reach": float(reachable.mean()),
+    #     "n_unreachable": int((~reachable).sum()),
+    #     "mean_min": float(T[reachable].mean()),
+    #     "mean_changes": float(M[reachable].mean()),
+    #     "mean_generalised_min": float(finite_gen.mean()),
+    #     "pop_total": float(c.sum()),
+    #     "pop_rail": float(c[n_jeep_od:].sum()),
+    #     "penalty_min": penalty,
+    # }
+    return z
+
+
+def eda_fitness_user_cost(network, graph_of_stops, population_gdf,
+                      catchment_m: float = CATCHMENT_RADIUS_M,
+                      theta: float = TRANSFER_PENALTY_MIN,
+                      rail_graph=None,
+                      city: str | None = None,
+                      jeep_transfer_m: float = JEEP_TRANSFER_MAX_M,
+                      rail_transfer_m: float = RAIL_TRANSFER_MAX_M,
                       return_details: bool = False,
                     ):
     # Every exit goes through out(). By default it hands back the objective on

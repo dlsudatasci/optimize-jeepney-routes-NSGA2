@@ -18,7 +18,7 @@ import statistics
 from genetic_algorithm.fitness import (
     compute_external_connectivity, compute_internal_connectivity,
     compute_redundancy, compute_robustness, compute_vulnerability,
-    fitness_capex_cost, fitness_network_efficiency, fitness_user_cost,
+    fitness_capex_cost, fitness_network_efficiency, eda_fitness_user_cost,
     get_network_coverage, normalize_vul_rob)
 
 from analysis.descriptive import describe_network
@@ -106,7 +106,7 @@ def evaluate_network(network, weights, total_potential_transport_nodes,
     }
 
     if graph_of_stops is not None and population_gdf is not None and city is not None:
-        user_cost, user_details = fitness_user_cost(
+        user_cost, user_details = eda_fitness_user_cost(
             network, graph_of_stops, population_gdf,
             catchment_m=catchment_m, city=city, return_details=True)
         result["Z_user"] = user_cost
