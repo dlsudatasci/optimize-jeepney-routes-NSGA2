@@ -108,12 +108,23 @@ def evaluate_network(network, weights, total_potential_transport_nodes,
     if graph_of_stops is not None and population_gdf is not None and city is not None:
         user_cost, user_details = fitness_user_cost(
             network, graph_of_stops, population_gdf,
-            catchment_m=catchment_m, city=city)
+            catchment_m=catchment_m, city=city, return_details=True)
         result["Z_user"] = user_cost
         result["Z_user Mean Min"] = user_details.get("mean_min")
         result["Z_user Mean Generalised Min"] = user_details.get("mean_generalised_min")
         result["Z_user Mean Changes"] = user_details.get("mean_changes")
+        # Reach here is not the same measure as "Reachable Stop Pairs" above.
+        # That one walks the route graph alone; this one is over the composed
+        # layer, where a short walk between nearby stops is allowed, so it is
+        # the higher of the two wherever the walk bridges a gap the routes
+        # leave. Taguig is the case that matters: 24% on the graph, 46% here.
         result["Z_user Reach"] = user_details.get("reach")
+        result["Z_user Unreachable Pairs"] = user_details.get("n_unreachable")
+        # What an unreachable pair is charged: the worst generalised cost seen
+        # on a reachable pair, plus one transfer penalty. Where reach is low
+        # this is most of what Z_user is made of, so it is reported rather
+        # than left inside the objective.
+        result["Z_user Penalty Min"] = user_details.get("penalty_min")
         result["Z_user OD Nodes"] = user_details.get("n_od")
         result["Z_user Rail OD Nodes"] = user_details.get("n_rail_od")
     else:
@@ -123,6 +134,8 @@ def evaluate_network(network, weights, total_potential_transport_nodes,
         result["Z_user Mean Generalised Min"] = MISSING
         result["Z_user Mean Changes"] = MISSING
         result["Z_user Reach"] = MISSING
+        result["Z_user Unreachable Pairs"] = MISSING
+        result["Z_user Penalty Min"] = MISSING
         result["Z_user OD Nodes"] = MISSING
         result["Z_user Rail OD Nodes"] = MISSING
 

@@ -3,6 +3,7 @@ name = "optimize-jeepney-routes-nsga2"
 version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
+    "contextily>=1.7.1",
     "folium>=0.20.0",
     "geojson>=3.3.0",
     "geopandas>=1.2.0",
