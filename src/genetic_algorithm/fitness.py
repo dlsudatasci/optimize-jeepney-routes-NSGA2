@@ -1,15 +1,29 @@
 from __future__ import annotations
 
-import networkx as nx
 import random
-from genetic_algorithm.schema import Route, Network
+
+import networkx as nx
 import numpy as np
+
 from config.config import (
-    TARGET_NODE_RATIO, MIN_INTERSECTIONS_PER_ROUTE, MIN_TRANSPO_STOPS_PER_ROUTE,
-    STOP_COST, STOP_SIZES, MAX_BUDGET, MAX_DEGREE,
-    JEEP_TRANSFER_MAX_M, RAIL_TRANSFER_MAX_M, TRANSFER_PENALTY_MIN,
-    CATCHMENT_RADIUS_M, INVALID_NETWORK_COST,
+    CATCHMENT_RADIUS_M,
+    INVALID_NETWORK_COST,
+    JEEP_TRANSFER_MAX_M,
+    MAX_BUDGET,
+    MAX_DEGREE,
+    MIN_INTERSECTIONS_PER_ROUTE,
+    MIN_TRANSPO_STOPS_PER_ROUTE,
+    RAIL_TRANSFER_MAX_M,
+    STOP_COST,
+    STOP_SIZES,
+    TARGET_NODE_RATIO,
+    TRANSFER_PENALTY_MIN,
 )
+from genetic_algorithm.schema import Network
+from utils import route_layer as rl
+from utils.rail_layer import LINES as _LINES
+from utils.rail_layer import rail_stations_for
+
 
 def fitness_score(
     network: Network,
@@ -18,13 +32,15 @@ def fitness_score(
     total_network_distance,
     allowed_edge,
     edge_len,
+    graph_of_stops: nx.MultiDiGraph,
+    population_gdf,
     stop_cost: int = STOP_COST,
     stop_sizes: list[float] = STOP_SIZES,
     max_degree: list[int] = MAX_DEGREE,
-    max_budget: int = MAX_BUDGET
+    max_budget: int = MAX_BUDGET,
 ):
     network_scores = []
-    # network_scores.append(fitness_user_cost(network)))
+    network_scores.append(fitness_user_cost(network, graph_of_stops, population_gdf))
     network_scores.append(fitness_network_efficiency(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len))
     network_scores.append(fitness_capex_cost(network, stop_cost, stop_sizes, max_degree, max_budget))
     return network_scores
@@ -158,13 +174,10 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
                       jeep_transfer_m: float = JEEP_TRANSFER_MAX_M,
                       rail_transfer_m: float = RAIL_TRANSFER_MAX_M,
                     ):
-    from utils import route_layer as rl
-    from utils.rail_layer import LINES as _LINES, rail_stations_for
-
     rail = rail_graph if rail_graph is not None else get_rail_graph()
 
     if not network.routes:
-        return INVALID_NETWORK_COST, {"n_od": 0, "reach": 0.0}
+        return INVALID_NETWORK_COST #, {"n_od": 0, "reach": 0.0}
 
     od = []
     seen = set()
@@ -176,7 +189,6 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
                 if end not in seen:
                     seen.add(end)
                     od.append(end)
-    n_jeep_od = len(od)
 
     rail_coords: dict = {}
     if city is not None:
@@ -191,7 +203,7 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
                 rail_coords[pair] = station_xyz[pair]
 
     if not od:
-        return INVALID_NETWORK_COST, {"n_od": 0, "reach": 0.0}
+        return INVALID_NETWORK_COST #, {"n_od": 0, "reach": 0.0}
 
     T, M = rl.cost_matrix(network, graph_of_stops, rail, od, theta=theta,
                           jeep_transfer_m=jeep_transfer_m,
@@ -207,11 +219,11 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
     reachable = np.isfinite(T)
 
     if not reachable.any():
-        return INVALID_NETWORK_COST, {"n_od": len(od), "reach": 0.0,
-                                      "mean_min": float("nan"),
-                                      "mean_changes": float("nan"),
-                                      "pop_total": float(c.sum()),
-                                      "penalty_min": float("nan")}
+        return INVALID_NETWORK_COST #, {"n_od": len(od), "reach": 0.0,
+                                    #   "mean_min": float("nan"),
+                                    #   "mean_changes": float("nan"),
+                                    #   "pop_total": float(c.sum()),
+                                    #   "penalty_min": float("nan")}
 
     # T excludes theta (route_layer subtracts it per path), so the generalised cost the objective sums is T + theta*M.
     generalised = T + theta * M
@@ -222,25 +234,25 @@ def fitness_user_cost(network, graph_of_stops, population_gdf,
 
     z = float((c[:, None] * cost).sum())
 
-    details = {
-        "n_od": len(od),
-        "n_jeep_od": n_jeep_od,
-        "n_rail_od": len(od) - n_jeep_od,
-        "reach": float(reachable.mean()),
-        "n_unreachable": int((~reachable).sum()),
-        "mean_min": float(T[reachable].mean()),
-        "mean_changes": float(M[reachable].mean()),
-        "mean_generalised_min": float(finite_gen.mean()),
-        "pop_total": float(c.sum()),
-        "pop_rail": float(c[n_jeep_od:].sum()),
-        "penalty_min": penalty,
-    }
-    return z, details
+    # details = {
+    #     "n_od": len(od),
+    #     "n_jeep_od": n_jeep_od,
+    #     "n_rail_od": len(od) - n_jeep_od,
+    #     "reach": float(reachable.mean()),
+    #     "n_unreachable": int((~reachable).sum()),
+    #     "mean_min": float(T[reachable].mean()),
+    #     "mean_changes": float(M[reachable].mean()),
+    #     "mean_generalised_min": float(finite_gen.mean()),
+    #     "pop_total": float(c.sum()),
+    #     "pop_rail": float(c[n_jeep_od:].sum()),
+    #     "penalty_min": penalty,
+    # }
+    return z
 
 # map stop size by number of degrees, return size of stop based on its stop class
 def get_stop_area(network, stop, stop_sizes, max_degree):
     degree = network.degree(stop)
-    for stop_class in range(0, 3):
+    for stop_class in range(3):
         upper = max_degree[stop_class]
         if degree <= upper:
             return stop_sizes[stop_class]
@@ -378,7 +390,7 @@ def compute_external_connectivity(
         # }
 
     r_e = 0
-    for _, stops in stop_list.items():
+    for stops in stop_list.values():
         transpo_count = sum(1 for stop in stops if stop in transpo_nodes)
         if transpo_count >= min_transpo_stops_per_route:
             r_e += 1
@@ -702,7 +714,7 @@ def _pct_tag(w):
     Convert weight (0.6) -> '60', (0.02) -> '02', (1.0) -> '100'
     Assumes weights are in [0,1].
     """
-    return f"{int(round(w * 100)):02d}"  # 0.1->10, 0.05->05
+    return f"{round(w * 100):02d}"  # 0.1->10, 0.05->05
 
 def make_run_tag(weights):
     return (
