@@ -6,7 +6,13 @@ from pathlib import Path
 from genetic_algorithm.schema import Network, Route
 
 ROOT = Path(__file__).resolve().parents[2]
-ORIGINAL_DIR = ROOT / "data" / "jeepney_routes" / "Saved Networks"
+#: Where the networks built from the route CSVs are cached.
+#:
+#: Not inside the ``data/jeepney_routes`` submodule: that holds the raw
+#: route exports, which are shared across the group, while these are build
+#: artefacts of this repo's pipeline. Keeping them apart is why the
+#: submodule move did not take the EDA's inputs with it a second time.
+ORIGINAL_DIR = ROOT / "data" / "original_network"
 SAVED_NETWORKS_DIR = ROOT / "data" / "saved_networks"
 
 CITIES = ("Makati", "Manila", "Taguig", "Mandaluyong")
@@ -25,16 +31,48 @@ def amenity_maps_path(*parts):
         raise FileNotFoundError(SUBMODULE_HINT)
     return path
 
+#: Per-city overrides for where a city's amenity points live.
+#:
+#: Taguig is the exception: the other three cities ship a GeoJSON named after
+#: the city, and Taguig has been through three names in two submodule commits.
+#: The current one is a zipped CSV carrying WKT in a ``geometry`` column, so
+#: both names stay listed, newest first, and whichever exists is read.
+#:
+#: Its tags are lowercase again under the 02fe154 submodule
+#: (residential / institutional / industrial / commercial / miscellaneous /
+#: transportation), matching the other three, so ``transportation`` means the
+#: same thing in every city and the counts are comparable.
 POINT_SOURCES = {
-    "Taguig": (("Taguig", "taguig_point.geojson"),
-               ("Taguig", "taguig_point.geojson.zip")),
+    "Taguig": (("Taguig City", "taguig_amenities_points.csv.zip"),
+               ("Taguig City", "taguig_point.geojson"),
+               ("Taguig City", "taguig_point.geojson.zip")),
 }
 
 
 def point_sources(city):
     """The candidate amenity point files for a city, best first."""
     return POINT_SOURCES.get(
-        city, (("Jacob-Group", f"{city} City", f"{city}_point.geojson"),))
+        city, ((f"{city} City", f"{city}_point.geojson"),))
+
+
+def _points_from_csv(path):
+    """Amenity points from a CSV of WKT, zipped or plain.
+
+    Geometry comes from the ``geometry`` column where there is one, and from
+    ``x``/``y`` otherwise. Coordinates are lon/lat, so the frame is tagged
+    EPSG:4326 to match what ``gpd.read_file`` returns for the GeoJSON cities.
+    """
+    import geopandas as gpd
+    import pandas as pd
+    from shapely import wkt
+
+    frame = pd.read_csv(path)
+    if "geometry" in frame.columns:
+        geometry = frame["geometry"].map(wkt.loads)
+    else:
+        geometry = gpd.points_from_xy(frame["x"], frame["y"])
+    return gpd.GeoDataFrame(frame.drop(columns=["geometry"], errors="ignore"),
+                            geometry=list(geometry), crs="EPSG:4326")
 
 
 def read_city_points(city):
@@ -45,6 +83,11 @@ def read_city_points(city):
         path = AMENITY_MAPS_DIR.joinpath(*parts)
         if not path.exists():
             continue
+        # A CSV, zipped or not, is read by pandas and given geometry from its
+        # WKT column. gpd.read_file on one returns the rows with no geometry
+        # at all, which fails later and a long way from here.
+        if ".csv" in path.name:
+            return _points_from_csv(path)
         if path.suffix == ".zip":
             return gpd.read_file(f"zip://{path.as_posix()}")
         return gpd.read_file(path)
@@ -56,8 +99,7 @@ def read_city_points(city):
 
 BUILT_FROM_CSV = {
     "Taguig": {
-        "routes_csv": ("amenity_maps", "Taguig", "Taguig Jeepney Routes",
-                       "Taguig_routes.csv"),
+        "routes_csv": ("repo", "data", "jeepney_routes", "Taguig_routes.csv"),
     },
     "Makati": {
         "routes_csv": ("repo", "data", "jeepney_routes",
@@ -81,8 +123,18 @@ def route_csv_path(recipe):
         return ROOT.joinpath(*parts)
     return amenity_maps_path(*parts)
 
+#: Road classes a jeepney is treated as able to run on.
+#:
+#: ``residential`` is here because the routes say so: before it was added,
+#: 24% of Makati's route arcs, 20% of Taguig's and 10% of Manila's were being
+#: dropped as "not allowed" while the real jeepneys plainly drive down them.
+#: Excluding it also put 1,582 holes in Manila's overlap map alone.
+#:
+#: The ``*_link`` classes are still out. Those are the ramps and slip roads at
+#: interchanges; a route crossing one still shows a short break.
 ALLOWED_HIGHWAY_TYPES = frozenset(
-    {"primary", "secondary", "tertiary", "trunk", "unclassified"})
+    {"primary", "secondary", "tertiary", "trunk", "unclassified",
+     "residential"})
 
 _DIRECTION_BY_SUFFIX = {"A": "forward", "B": "reverse",
                         "F": "forward", "R": "reverse"}
@@ -347,9 +399,11 @@ def count_transport_amenities(city: str) -> int:
     output: zone creation merges amenities that sit close together, which for
     Makati collapses 119 transport points into 29 zones. Using the merged
     count made a network's own transport stop count exceed the city total.
-    The raw counts line up with the figures Original Jeepney Routes.ipynb
-    already uses (Makati 111, Manila 464, Mandaluyong 45), which came from the
-    same points filtered to the city bounds.
+    Measured against the ``02fe154`` amenity submodule: Makati 119, Manila
+    507, Taguig 570. Original Jeepney Routes.ipynb quotes 111 / 464 / 45 from
+    an older snapshot of the same points; the submodule has grown since, and
+    the two numbers have to come from one source or external connectivity is
+    not comparable between the baseline and an optimised network.
     """
     frame = read_city_points(city)
     return int((frame["amenity"] == "transportation").sum())
