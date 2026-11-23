@@ -57,15 +57,7 @@ def get_reverse_route(route: Route, graph_of_stops, partner_edges, nodes_yx) -> 
 
     reverse_route = nx.shortest_path(graph_of_stops, start_node, end_node, weight='length')
     reverse_route_list.append(reverse_route)
-
-    # Get the total distance from point A to point B
-    distance_travelled = 0
-    for i in range(len(reverse_route)-1):
-      ay, ax = nodes_yx[reverse_route[i]]
-      by, bx = nodes_yx[reverse_route[i+1]]
-      distance_travelled += get_distance_path((ay, ax), (by, bx))
-
-    total_distance += distance_travelled
+    total_distance += get_distance_path(reverse_route, graph_of_stops)
 
   return Route(reverse_route_list, reverse_route_id, total_distance, route.line_id, direction="reverse")
 
