@@ -1,7 +1,7 @@
 import networkx as nx
 
+from genetic_algorithm.mutate import get_distance_path
 from genetic_algorithm.schema import Route
-from utils.route_utils import haversine
 
 
 # Iterate through each node in reverse and get the shortest path
@@ -63,7 +63,7 @@ def get_reverse_route(route: Route, graph_of_stops, partner_edges, nodes_yx) -> 
     for i in range(len(reverse_route)-1):
       ay, ax = nodes_yx[reverse_route[i]]
       by, bx = nodes_yx[reverse_route[i+1]]
-      distance_travelled += haversine((ay, ax), (by, bx))
+      distance_travelled += get_distance_path((ay, ax), (by, bx))
 
     total_distance += distance_travelled
 

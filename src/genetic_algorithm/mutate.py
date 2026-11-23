@@ -50,7 +50,9 @@ def mutate(network: Network, graph_of_stops: nx.MultiDiGraph, walk_dist: int):
     removed_dist += graph.get_edge_data(prev_node, old_stop, route_id)["distance"]
   if not is_end:
     removed_dist += graph.get_edge_data(old_stop, next_node, route_id)["distance"]
+
   subset_distance = route_obj.length - removed_dist
+  min_distance = min(7.0, 0.35 * MAX_DISTANCE)
 
   # Search for a new connection
   for new_stop in nearby_stops:
@@ -67,7 +69,7 @@ def mutate(network: Network, graph_of_stops: nx.MultiDiGraph, walk_dist: int):
     dist2 = get_distance_path(path2, graph_of_stops) if path2 else 0.0
     new_length = subset_distance + dist1 + dist2
 
-    if new_length <= MAX_DISTANCE:
+    if min_distance <= new_length <= MAX_DISTANCE:
       graph.add_node(new_stop, **graph_of_stops.nodes[new_stop])
 
       if not is_start:
@@ -89,10 +91,9 @@ def mutate(network: Network, graph_of_stops: nx.MultiDiGraph, walk_dist: int):
   return False
 
 def get_distance_path(path: list, graph_of_stops: nx.MultiDiGraph):
-  return sum(
-    haversine(
-      (graph_of_stops.nodes[path[i]]["y"], graph_of_stops.nodes[path[i]]["x"]),
-      (graph_of_stops.nodes[path[i + 1]]["y"], graph_of_stops.nodes[path[i + 1]]["x"]),
-    )
-    for i in range(len(path) - 1)
-  )
+  total = 0.0
+  for i in range(len(path) - 1):
+    edge_dict = graph_of_stops.get_edge_data(path[i], path[i + 1])
+    edge_data = min(edge_dict.values(), key=lambda d: d.get("length", float("inf")))
+    total += edge_data["length"] / 1000.0
+  return total
