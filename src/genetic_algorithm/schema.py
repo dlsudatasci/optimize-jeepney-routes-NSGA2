@@ -75,6 +75,10 @@ class RunState:
   best_max_score: float = 0.0
   best_avg_score: float = 0.0
   elapsed_before: float = 0.0
+  hv_anchor: tuple[np.ndarray, np.ndarray] | None = None
+  best_hv: float = -np.inf
+  hv_history: list = field(default_factory=list)
+  best_hv_list: list = field(default_factory=list)
 
   def to_checkpoint(self, elapsed_total: float) -> dict:
     return {
@@ -89,6 +93,10 @@ class RunState:
       "elapsed_seconds": elapsed_total,
       "python_random_state": random.getstate(),
       "numpy_random_state": np.random.get_state(),
+      "hv_anchor": self.hv_anchor,
+      "best_hv": self.best_hv,
+      "hv_history": self.hv_history,
+      "best_hv_list": self.best_hv_list
     }
 
   @classmethod
@@ -107,4 +115,8 @@ class RunState:
       best_max_score=checkpoint["current_highest_max_score"],
       best_avg_score=checkpoint["current_highest_avg_score"],
       elapsed_before=checkpoint.get("elapsed_seconds", 0.0),
+      hv_anchor=checkpoint.get("hv_anchor", None),
+      best_hv=checkpoint.get("best_hv", -np.inf),
+      hv_history=checkpoint.get("hv_history", []),
+      best_hv_list=checkpoint.get("best_hv_list", [])
     )
