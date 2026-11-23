@@ -30,9 +30,10 @@ from scipy.sparse.csgraph import dijkstra as sp_dijkstra
 from scipy.spatial import cKDTree
 
 from config.config import (
-    JEEP_TRANSFER_MAX_M, RAIL_TRANSFER_MAX_M, TRANSFER_PENALTY_MIN,
+  JEEP_TRANSFER_MAX_M,
+  RAIL_TRANSFER_MAX_M,
+  TRANSFER_PENALTY_MIN,
 )
-
 from utils.rail_layer import LINES, RAIL_INTERCHANGES
 
 JEEP_SPEED_KPH = 18.0
@@ -255,7 +256,7 @@ def cost_matrix(network, graph_of_stops, rail: nx.Graph, od_nodes: list,
     n_od = len(od_nodes)
     T = np.full((n_od, n_od), np.inf)
     Mcnt = np.zeros((n_od, n_od), dtype=np.int16)
-    best_gen = np.full((n_od, n_od), np.inf) #  Best generalized cost seen per OD pair. 
+    best_gen = np.full((n_od, n_od), np.inf) #  Best generalized cost seen per OD pair.
 
     def nodes_for(x):
         if _is_rail(x):

@@ -1,15 +1,15 @@
+import pickle
+import random
 from pathlib import Path
 
 import numpy as np
-import random, os
-import pickle
 
 BACKUP_DIR = Path("../data/ga_checkpoints")
 
 def save_ga_checkpoint(run_tag, state_data, city_name):
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    filepath = BACKUP_DIR / f"GA_checkpoint_{city_name}_{run_tag}.pikl"
-    temp_filepath = filepath.with_suffix('.pikl.tmp')
+    filepath = BACKUP_DIR / f"GA_checkpoint_{city_name}_{run_tag}.pkl"
+    temp_filepath = filepath.with_suffix('.pkl.tmp')
 
     state_data["python_random_state"] = random.getstate()
     state_data["numpy_random_state"] = np.random.get_state()
@@ -20,7 +20,7 @@ def save_ga_checkpoint(run_tag, state_data, city_name):
     temp_filepath.replace(filepath)
 
 def load_ga_checkpoint(run_tag, city_name) -> dict:
-    filepath = BACKUP_DIR / f"GA_checkpoint_{city_name}_{run_tag}.pikl"
+    filepath = BACKUP_DIR / f"GA_checkpoint_{city_name}_{run_tag}.pkl"
 
     if not filepath.exists():
         return None
@@ -33,7 +33,7 @@ def load_ga_checkpoint(run_tag, city_name) -> dict:
         return None
 
 def delete_ga_checkpoint(run_tag, city_name):
-    filepath = BACKUP_DIR / f"GA_checkpoint_{city_name}_{run_tag}.pikl"
+    filepath = BACKUP_DIR / f"GA_checkpoint_{city_name}_{run_tag}.pkl"
     if filepath.exists():
         filepath.unlink()
 

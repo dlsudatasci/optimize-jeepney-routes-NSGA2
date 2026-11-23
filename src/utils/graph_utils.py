@@ -18,9 +18,8 @@ def load_graph(graph_dir):
     graph = ox.load_graphml(graph_dir)
 
     print("Graph loaded successfully")
-    # print("NUMBER OF EDGES: ", graph.number_of_edges())
-    # print("NUMBER OF NODES: ", graph.number_of_nodes())
-    # print('\n')
+    print("NUMBER OF EDGES: ", graph.number_of_edges())
+    print("NUMBER OF NODES: ", graph.number_of_nodes())
     return graph
 
 def improved_route_plot(graph, route, color, map_obj, route_id, dash_array=None):

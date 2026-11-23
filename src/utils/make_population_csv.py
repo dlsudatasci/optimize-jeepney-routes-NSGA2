@@ -1,6 +1,7 @@
 # run: python -m utils.make_population_csv <city_name> (only "Taguig" works)
 
 from __future__ import annotations
+
 import argparse
 import os
 import sys
@@ -29,7 +30,7 @@ REQUIRED_COLS = ("longitude", "latitude", VALUE_COL)
 BBOX_PAD = 0.25
 CHUNK_ROWS = 2_000_000
 
-# for sanity check 
+# for sanity check
 CENSUS_2020 = {
     "Taguig": 1_366_659,
     "Makati": 629_616,

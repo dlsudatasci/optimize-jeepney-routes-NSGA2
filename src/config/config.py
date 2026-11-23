@@ -1,9 +1,9 @@
 # IRSG
-NETWORK_AMT = 100
+N_NETWORKS = 100
 WALKING_DISTANCES = [500, 750, 1000] # changed to thesis paper
 WD_TO_USE = 1
 MAX_DISTANCE = 15
-ROUTE_AMOUNT_MEDIANS = {"Makati":28, "Manila":50, "Taguig":18, "Mandaluyong":10} # og routes count (manila capped at 50 for runtime concerns)
+N_ROUTES = {"Makati":28, "Manila":50, "Taguig":18, "Mandaluyong":10} # og routes count (manila capped at 50 for runtime concerns)
 STOP_MIN = 20
 
 CONNECTION_TYPES = ["Default", "Area", "Degree", "Mixed"]
@@ -50,4 +50,5 @@ FITNESS_WEIGHTS = {
     "w_rob": 0.20,
     "w_red": 0.20,
 }
+
 FILTER_OPTIONS = ['primary', 'secondary', 'tertiary', 'trunk', 'unclassified']

@@ -5,73 +5,80 @@ from utils.route_utils import haversine
 
 
 # Iterate through each node in reverse and get the shortest path
-def get_reverse_route(route: Route, graph_of_stops, partner_edges, nodes_yx):
-    paths = route.route
-    reverse_paths = paths[::-1]
-    reverse_route_list = []
+def get_reverse_route(route: Route, graph_of_stops, partner_edges, nodes_yx) -> Route | None:
+  paths = route.route
 
-    reverse_route_id = f"{route.line_id}-R" # Reverse Route ID
-    total_distance = 0
+  if not paths:
+    return None
 
-    used_stops = []
-    stop_list = []
+  reverse_paths = paths[::-1]
+  reverse_route_list = []
 
-    for connection in reverse_paths:
-        reverse_route_path = connection[::-1]
+  reverse_route_id = f"{route.line_id}-R" # Reverse Route ID
+  total_distance = 0
+
+  used_stops = []
+  stop_list = []
+  start_node = None
+
+  for idx, connection in enumerate(reverse_paths):
+    reverse_route_path = connection[::-1]
+    end_node = reverse_route_path[-1]
+
+    # Getting the edges of the start node only for the first connection
+    if idx == 0:
+      start_node = reverse_route_path[0]
+      new_start_node = get_opposite_side_stop(start_node, graph_of_stops, partner_edges)
+      if new_start_node is not None:
+        start_node = new_start_node
+      used_stops.append(start_node)
+
+    # Getting the edges of the end node
+    new_end_node = get_opposite_side_stop(end_node, graph_of_stops, partner_edges)
+    if new_end_node is not None:
+      end_node = new_end_node
+
+    if start_node not in graph_of_stops or end_node not in graph_of_stops or not nx.has_path(graph_of_stops, start_node, end_node):
+      if start_node not in graph_of_stops or reverse_route_path[-1] not in graph_of_stops or not nx.has_path(graph_of_stops, start_node, reverse_route_path[-1]):
+        return None
+      else:
         end_node = reverse_route_path[-1]
 
-        # Getting the edges of the start node only for the first connection
-        if reverse_paths.index(connection) == 0:
-            start_node = reverse_route_path[0] # Start node is critical as it should be the same as the last stop previous connection (If this is not the first connection)
-            new_start_node = get_opposite_side_stop(start_node, graph_of_stops, partner_edges)
-            if new_start_node is not None:
-                start_node = new_start_node
-            used_stops.append(start_node)
+    if end_node not in used_stops:
+      used_stops.append(end_node)
+    else:
+      return None
 
-        # Getting the edges of the end node
-        new_end_node = get_opposite_side_stop(end_node, graph_of_stops, partner_edges)
-        if new_end_node is not None:
-            end_node = new_end_node
+    stop_list.append([start_node, end_node])
+    start_node = end_node # Next start node is previous end node
 
-        if not nx.has_path(graph_of_stops, start_node, end_node):
-            if not nx.has_path(graph_of_stops, start_node, reverse_route_path[-1]):
-                return None
-            else:
-                end_node = reverse_route_path[-1]
+  for connection in stop_list:
+    start_node, end_node = connection[0], connection[-1]
 
-        if end_node not in used_stops:
-            used_stops.append(end_node)
-        else:
-            return None
+    reverse_route = nx.shortest_path(graph_of_stops, start_node, end_node, weight='length')
+    reverse_route_list.append(reverse_route)
 
-        stop_list.append([start_node, end_node])
-        start_node = end_node # Next start node is previous end node
+    # Get the total distance from point A to point B
+    distance_travelled = 0
+    for i in range(len(reverse_route)-1):
+      ay, ax = nodes_yx[reverse_route[i]]
+      by, bx = nodes_yx[reverse_route[i+1]]
+      distance_travelled += haversine((ay, ax), (by, bx))
 
-    for connection in stop_list:
-        start_node, end_node = connection[0], connection[-1]
+    total_distance += distance_travelled
 
-        reverse_route = nx.shortest_path(graph_of_stops, start_node, end_node, weight='length')
-        reverse_route_list.append(reverse_route)
-
-        # Get the total distance from point A to point B
-        distance_travelled = 0
-        for i in range(len(reverse_route)-1):
-            ay, ax = nodes_yx[reverse_route[i]]
-            by, bx = nodes_yx[reverse_route[i+1]]
-            distance_travelled += haversine((ay, ax), (by, bx)).kilometers
-
-        total_distance += distance_travelled
-
-    return Route(reverse_route_list, reverse_route_id, total_distance, route.line_id, direction="reverse")
+  return Route(reverse_route_list, reverse_route_id, total_distance, route.line_id, direction="reverse")
 
 # Checking the edges -> This is to see if the stop is in a one-way route
 def get_opposite_side_stop(node, graph_of_stops, partner_edges):
-  out_edges = list(graph_of_stops.out_edges(node, keys=True, data=True))
+  if node not in graph_of_stops:
+    return None
 
+  out_edges = list(graph_of_stops.out_edges(node, keys=True, data=True))
   if not out_edges:
     return None
 
-  _,_,_,data = out_edges[0]
+  _, _, _, data = out_edges[0]
   opposite_node = None
 
   eid = data.get('edge_id')

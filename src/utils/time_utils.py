@@ -1,4 +1,6 @@
-import logging, time
+import logging
+import time
+
 
 def format_elapsed(seconds):
     minutes = int(seconds // 60)
