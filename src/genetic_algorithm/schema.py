@@ -41,15 +41,12 @@ class Network:
   def __init__(self, routes: list[Route], graph: nx.MultiDiGraph):
     self.routes = routes
     self.graph = graph
-    self.fitness_score = None
-    self.fitness_score_components = {}  # individual components for fitness
-
+    self.fitness_score: np.array | None = None
 
 @dataclass(frozen=True, slots=True)
 class HyperParameters:
   fitness_weights: dict
   walk_distance: int
-  elitism_rate: float = 0.1
   selection_rate: float = 0.10
   mutation_probability: float = 0.2
   mutations_per_child: Sequence[float] = (0.1, 0.1, 0.4, 0.2, 0.2)

@@ -34,16 +34,20 @@ def fitness_score(
     edge_len,
     graph_of_stops: nx.MultiDiGraph,
     population_gdf,
+    city_name,
     stop_cost: int = STOP_COST,
     stop_sizes: list[float] = STOP_SIZES,
     max_degree: list[int] = MAX_DEGREE,
     max_budget: int = MAX_BUDGET,
 ):
-    network_scores = []
-    network_scores.append(fitness_user_cost(network, graph_of_stops, population_gdf))
-    network_scores.append(fitness_network_efficiency(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len))
-    network_scores.append(fitness_capex_cost(network, stop_cost, stop_sizes, max_degree, max_budget))
-    return network_scores
+    efficiency = fitness_network_efficiency(
+          network, weights, total_potential_transport_nodes,
+          total_network_distance, allowed_edge, edge_len,
+        )
+    z_user = fitness_user_cost(network, graph_of_stops, population_gdf, city=city_name)
+    capex = fitness_capex_cost(network)
+    return np.array([z_user, capex, efficiency]) # min, min, max
+
 
 def fitness_network_efficiency(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len):
     internal_connectivity = compute_internal_connectivity(

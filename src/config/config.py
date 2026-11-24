@@ -11,7 +11,7 @@ TARGET_NODE_RATIO = 0.75   #for N_i
 MIN_INTERSECTIONS_PER_ROUTE = 3   # n for r_i
 MIN_TRANSPO_STOPS_PER_ROUTE = 2   # n for r_e
 
-# capex
+# CapEx
 STOP_COST = 28000
 STOP_SIZES = [27.0, 40.5, 54.0]
 MAX_DEGREE = [3, 5, 999999]
@@ -43,12 +43,13 @@ CATCHMENT_RADIUS_M = 500.0     # radius of a stop's population catchment
 INVALID_NETWORK_COST = 1e12
 
 FITNESS_WEIGHTS = {
-    "w_cov": 0.20,
-    "w_int": 0.10,
-    "w_ext": 0.10,
-    "w_vul": 0.20,
-    "w_rob": 0.20,
-    "w_red": 0.20,
+  "w_cov": 0.20,
+  "w_int": 0.10,
+  "w_ext": 0.10,
+  "w_vul": 0.20,
+  "w_rob": 0.20,
+  "w_red": 0.20,
 }
 
+MUTATE_WEIGHTS = [0.30, 0.25, 0.25, 0.2] # Insert, Remove, Extend, Shorten
 FILTER_OPTIONS = ['primary', 'secondary', 'tertiary', 'trunk', 'unclassified']

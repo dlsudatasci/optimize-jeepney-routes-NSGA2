@@ -88,7 +88,6 @@ def calc_jaccard_sim(route1: Route, route2: Route):
   union = edges1.union(edges2)
   return len(intersection) / len(union)
 
-
 def group_into_lines(routes: list[Route]):
   lines = {}
   for route in routes:
@@ -96,7 +95,6 @@ def group_into_lines(routes: list[Route]):
       lines[route.line_id] = []
     lines[route.line_id].append(route)
   return list(lines.values())
-
 
 # sim threshold determines how much of the edges have to be the same to determine if it is to be repaired
 def repair_chromosome(
