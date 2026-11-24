@@ -8,7 +8,7 @@ BACKUP_DIR = Path("../data/ga_checkpoints")
 
 def save_ga_checkpoint(run_tag, state_data, city_name):
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    filepath = BACKUP_DIR / f"GA_checkpoint_{city_name}_{run_tag}.pkl"
+    filepath = BACKUP_DIR / f"GA_checkpoint_{city_name}{run_tag}.pkl"
     temp_filepath = filepath.with_suffix('.pkl.tmp')
 
     state_data["python_random_state"] = random.getstate()
@@ -47,3 +47,18 @@ def save_data(data, path):
 def load_data(path):
     with open(path, 'rb') as f:
         return pickle.load(f)
+
+def save_final_networks(run_tag: str, networks: list, city_name: str, hv_history: list | None = None):
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    filepath = BACKUP_DIR / f"GA_final_{city_name}_{run_tag}.pkl"
+    temp_filepath = filepath.with_suffix(".pkl.tmp")
+
+    payload = {
+        "best_population": networks,
+        "hv_history": hv_history or [],
+    }
+
+    with open(temp_filepath, "wb") as f:
+        pickle.dump(payload, f)
+
+    temp_filepath.replace(filepath)

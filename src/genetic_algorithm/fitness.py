@@ -1,160 +1,217 @@
 from __future__ import annotations
 
 import random
+import threading
 
 import networkx as nx
 import numpy as np
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import connected_components
+from scipy.spatial import cKDTree
 
 from config.config import (
     CATCHMENT_RADIUS_M,
+    FILTER_OPTIONS,
     INVALID_NETWORK_COST,
     JEEP_TRANSFER_MAX_M,
-    MAX_BUDGET,
-    MAX_DEGREE,
     MIN_INTERSECTIONS_PER_ROUTE,
     MIN_TRANSPO_STOPS_PER_ROUTE,
     RAIL_TRANSFER_MAX_M,
-    STOP_COST,
-    STOP_SIZES,
     TARGET_NODE_RATIO,
     TRANSFER_PENALTY_MIN,
 )
-from genetic_algorithm.schema import Network
+from genetic_algorithm.schema import HyperParameters, Network
 from utils import route_layer as rl
 from utils.rail_layer import LINES as _LINES
 from utils.rail_layer import rail_stations_for
 
+_CITY_CACHE: dict[str, tuple[dict[frozenset, bool], dict[frozenset, float], float, int]] = {}
+_RAIL_CACHE: dict[str, object] = {}
+_CACHE_LOCK = threading.Lock()
+
+def _get_city_stats(city_name: str, graph_of_stops: nx.MultiDiGraph):
+    if city_name in _CITY_CACHE:
+        return _CITY_CACHE[city_name]
+
+    with _CACHE_LOCK:
+        if city_name in _CITY_CACHE:
+            return _CITY_CACHE[city_name]
+
+        allowed_edge: dict[frozenset, bool] = {}
+        edge_len: dict[frozenset, float] = {}
+        total_network_distance = 0.0
+
+        for u, v, _, data in graph_of_stops.edges(keys=True, data=True):
+            if data.get("junction") is not None:
+                continue
+            hw = data.get("highway")
+            allowed = (
+                any(h in FILTER_OPTIONS for h in hw)
+                if isinstance(hw, list)
+                else (hw in FILTER_OPTIONS)
+            )
+
+            length = data.get("length", 0.0)
+            allowed_edge[(u, v)] = allowed
+            allowed_edge[(v, u)] = allowed
+            edge_len[(u, v)] = length
+            edge_len[(v, u)] = length
+            if allowed:
+                total_network_distance += length
+
+        n_transport_nodes = sum(1 for _, d in graph_of_stops.nodes(data=True) if d.get("isTranspo"))
+
+        _CITY_CACHE[city_name] = (
+            allowed_edge,
+            edge_len,
+            total_network_distance,
+            n_transport_nodes,
+        )
+        return _CITY_CACHE[city_name]
+
 
 def fitness_score(
     network: Network,
-    weights,
-    total_potential_transport_nodes,
-    total_network_distance,
-    allowed_edge,
-    edge_len,
+    hp: HyperParameters,
     graph_of_stops: nx.MultiDiGraph,
     population_gdf,
-    city_name,
-    stop_cost: int = STOP_COST,
-    stop_sizes: list[float] = STOP_SIZES,
-    max_degree: list[int] = MAX_DEGREE,
-    max_budget: int = MAX_BUDGET,
-):
-    efficiency = fitness_network_efficiency(
-          network, weights, total_potential_transport_nodes,
-          total_network_distance, allowed_edge, edge_len,
-        )
-    z_user = fitness_user_cost(network, graph_of_stops, population_gdf, city=city_name)
-    capex = fitness_capex_cost(network)
-    return np.array([z_user, capex, efficiency]) # min, min, max
-
-
-def fitness_network_efficiency(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len):
-    internal_connectivity = compute_internal_connectivity(
-        network,
-        target_node_ratio=TARGET_NODE_RATIO,
-        min_intersections_per_route=MIN_INTERSECTIONS_PER_ROUTE
+    city_name: str,
+) -> tuple[np.ndarray, float]:
+    allowed_edge, edge_len, total_network_distance, n_transport_nodes = _get_city_stats(
+        city_name, graph_of_stops
     )
 
-    external_connectivity = compute_external_connectivity(
-        network,
-        total_potential_transport_nodes=total_potential_transport_nodes,
-        min_transpo_stops_per_route=MIN_TRANSPO_STOPS_PER_ROUTE
-    )
+    z_efficiency = fitness_network_efficiency(network, hp.fitness_weights, n_transport_nodes, total_network_distance, allowed_edge, edge_len)
+    z_user = fitness_user_cost(network, graph_of_stops, population_gdf, hp.catchment_m, city=city_name)
+    z_capex = fitness_capex_cost(network, hp.stop_cost, hp.stop_sizes, hp.max_degree)
 
-    weighted_internal_connectivity = weights["w_int"] * internal_connectivity
-    weighted_external_connectivity = weights["w_ext"] * external_connectivity
 
-    network_coverage = get_network_coverage(network.graph, total_network_distance, allowed_edge, edge_len)
-    weighted_network_coverage = weights["w_cov"] * network_coverage
+    violation = 0.0
+    if z_capex > hp.max_budget:
+        violation += (z_capex - hp.max_budget) / max(hp.max_budget, 1.0) # budget excess
+    if z_user >= INVALID_NETWORK_COST:
+        violation += 1.0 # unscorable
+    return np.array([z_user, z_capex, z_efficiency]), violation # min, min, max
 
-    vul, q_c_vul = compute_vulnerability(network.graph)
-    vulnerability = normalize_vul_rob(vul, q_c_vul)
-    weighted_vulnerability = weights["w_vul"] * vulnerability
 
-    rob, q_c_rob = compute_robustness(network.graph)
-    robustness = normalize_vul_rob(rob, q_c_rob)
-    weighted_robustness = weights["w_rob"] * robustness
+def fitness_network_efficiency(
+    network: Network,
+    weights: dict[str, float],
+    total_potential_transport_nodes: int,
+    total_network_distance: float,
+    allowed_edge: dict[frozenset, bool],
+    edge_len: dict[frozenset, float],
+) -> float:
+  route_stops = {}
+  for route in network.routes:
+      stops = route_stops.get(route.route_id)
+      if stops is None:
+          stops = route_stops[route.route_id] = set()
+      for connection in route.route:
+          if connection:
+              stops.update((connection[0], connection[-1]))
 
-    redundancy = compute_redundancy(network, edge_len)
-    weighted_redundancy = weights["w_red"] * redundancy
+  arcs = {}
+  for successors in network.graph.adj.values():
+      for edges in successors.values():
+          for key, data in edges.items():
+              path = data["road_path"]
+              for i in range(1, len(path)):
+                  arc = (path[i - 1], path[i])
+                  if arc in edge_len:
+                      routes = arcs.get(arc)
+                      if routes is None:
+                          arcs[arc] = {key}
+                      else:
+                          routes.add(key)
 
-    # data = {
-    #     "Coverage": weighted_network_coverage,
-    #     "Internal Connectivity": weighted_internal_connectivity,
-    #     "External Connectivity": weighted_external_connectivity,
-    #     "Vulnerability": weighted_vulnerability,
-    #     "Robustness": weighted_robustness,
+  nodes = list(network.graph.adj)
+  index = {node: i for i, node in enumerate(nodes)}
+  rows, cols = [], []
+  for node, successors in network.graph.adj.items():
+      i = index[node]
+      for successor in successors:
+          j = index[successor]
+          if i != j:
+              rows.append(i)
+              cols.append(j)
+              rows.append(j)
+              cols.append(i)
 
-    #     "Coverage Raw": network_coverage,
-    #     "Internal Connectivity Raw": internal_connectivity,
-    #     "External Connectivity Raw": external_connectivity,
-    #     "Vulnerability Raw": vulnerability,
-    #     "Robustness Raw": robustness,
+  adjacency = csr_matrix((np.ones(len(rows), dtype=bool), (rows, cols)), shape=(len(nodes), len(nodes)))
 
-    #     "Total Network Nodes": len(network.graph.nodes()),
-    #     "Total Potential Transport Nodes": total_potential_transport_nodes,
+  internal_connectivity = compute_internal_connectivity(
+    network,
+    target_node_ratio=TARGET_NODE_RATIO,
+    min_intersections_per_route=MIN_INTERSECTIONS_PER_ROUTE,
+    route_stops=route_stops,
+  )
 
-    #     "n_i": internal_details["n_i"],
-    #     "N_i": internal_details["N_i"],
-    #     "r_i": internal_details["r_i"],
-    #     "R_i": internal_details["R_i"],
-    #     "Min Intersections Per Route": internal_details["min_intersections_per_route"],
+  external_connectivity = compute_external_connectivity(
+    network,
+    total_potential_transport_nodes=total_potential_transport_nodes,
+    min_transpo_stops_per_route=MIN_TRANSPO_STOPS_PER_ROUTE,
+    route_stops=route_stops
+  )
 
-    #     "n_e": external_details["n_e"],
-    #     "N_e": external_details["N_e"],
-    #     "r_e": external_details["r_e"],
-    #     "R_e": external_details["R_e"],
-    #     "Min Transpo Stops Per Route": external_details["min_transpo_stops_per_route"],
+  weighted_internal_connectivity = weights["w_int"] * internal_connectivity
+  weighted_external_connectivity = weights["w_ext"] * external_connectivity
 
-    #     "Target Node Ratio": TARGET_NODE_RATIO,
+  network_coverage = get_network_coverage(total_network_distance, allowed_edge, edge_len, arcs=arcs)
+  weighted_network_coverage = weights["w_cov"] * network_coverage
 
-    #     "q_c Vulnerability": q_c_vul,
-    #     "q_c Robustness": q_c_rob,
-    # }
+  vul, q_c_vul = compute_vulnerability(network.graph, adjacency=adjacency)
+  vulnerability = normalize_vul_rob(vul, q_c_vul)
+  weighted_vulnerability = weights["w_vul"] * vulnerability
 
-    total_weight = (
-        weights["w_cov"]
-        + weights["w_int"]
-        + weights["w_ext"]
-        + weights["w_vul"]
-        + weights["w_rob"]
-        + weights["w_red"]
-    )
+  rob, q_c_rob = compute_robustness(network.graph, adjacency=adjacency)
+  robustness = normalize_vul_rob(rob, q_c_rob)
+  weighted_robustness = weights["w_rob"] * robustness
 
-    weighted_sum = (
-        weighted_network_coverage
-        + weighted_internal_connectivity
-        + weighted_external_connectivity
-        + weighted_vulnerability
-        + weighted_robustness
-        + weighted_redundancy
-    )
+  redundancy = compute_redundancy(edge_len, arcs=arcs)
+  weighted_redundancy = weights["w_red"] * redundancy
 
-    fitness_score = 0.0 if total_weight <= 0 else weighted_sum / total_weight
+  total_weight = (
+    weights["w_cov"]
+    + weights["w_int"]
+    + weights["w_ext"]
+    + weights["w_vul"]
+    + weights["w_rob"]
+    + weights["w_red"]
+  )
 
-    return fitness_score
+  weighted_sum = (
+    weighted_network_coverage
+    + weighted_internal_connectivity
+    + weighted_external_connectivity
+    + weighted_vulnerability
+    + weighted_robustness
+    + weighted_redundancy
+  )
+
+  return 0.0 if total_weight <= 0 else weighted_sum / total_weight
+
 
 # stop costs based off singapore minimum size (9m x 3m) with length multiplied by factor of 1x, 1.5x, 2x
 # price is computed based off dotr figures (28k per sqm)
 def fitness_capex_cost(
     network: Network,
-    stop_cost: int = STOP_COST,
-    stop_sizes: list[float] = STOP_SIZES,
-    max_degree: list[int] = MAX_DEGREE,
-    max_budget: int = MAX_BUDGET
-):
-    fixed_penalty = 100000000 # placeholder?
+    stop_cost: float,
+    stop_sizes: tuple[float, float, float],
+    max_degree: tuple[int, int, int],
+) -> float:
     area = 0.0
-    for stop in network.graph.nodes():
-        if network.graph.degree(stop) < 1:
+    for _stop, degree in network.graph.degree():
+        if degree < 1:
             continue
-        area += get_stop_area(network.graph, stop, stop_sizes, max_degree)
+        if degree <= max_degree[0]:
+          area += stop_sizes[0]
+        elif degree <= max_degree[1]:
+          area += stop_sizes[1]
+        else:
+          area += stop_sizes[2]
 
-    capex_cost = area * stop_cost
-    if(capex_cost - max_budget > 0):
-        capex_cost += fixed_penalty
-    return capex_cost
+    return area * stop_cost
 
 """
 Z_user(R) = sum_o C_o * sum_d [t_od(R) + theta * m_od(R)]
@@ -170,105 +227,92 @@ Notes:
 - Unreachable pairs are charged the worst observed generalised cost plus theta
 Returns user cost (aggregate) or INVALID_NETWORK_COST when the network cannot be scored (e.g. no routes)
 """
-def fitness_user_cost(network, graph_of_stops, population_gdf,
-                      catchment_m: float = CATCHMENT_RADIUS_M,
-                      theta: float = TRANSFER_PENALTY_MIN,
-                      rail_graph=None,
-                      city: str | None = None,
-                      jeep_transfer_m: float = JEEP_TRANSFER_MAX_M,
-                      rail_transfer_m: float = RAIL_TRANSFER_MAX_M,
-                    ):
-    rail = rail_graph if rail_graph is not None else get_rail_graph()
+def fitness_user_cost(
+    network: Network,
+    graph_of_stops: nx.MultiDiGraph,
+    population_gdf,
+    catchment_m: float,
+    city: str,
+    theta: float = TRANSFER_PENALTY_MIN,
+    rail_graph=None,
+    jeep_transfer_m: float = JEEP_TRANSFER_MAX_M,
+    rail_transfer_m: float = RAIL_TRANSFER_MAX_M,
+) -> float:
+  rail = rail_graph if rail_graph is not None else get_rail_graph()
 
-    if not network.routes:
-        return INVALID_NETWORK_COST #, {"n_od": 0, "reach": 0.0}
+  if not network.routes:
+    return INVALID_NETWORK_COST
 
-    od = []
-    seen = set()
-    for route in network.routes:
-        for conn in route.route:
-            if not conn:
-                continue
-            for end in (conn[0], conn[-1]):
-                if end not in seen:
-                    seen.add(end)
-                    od.append(end)
+  od = []
+  seen = set()
+  for route in network.routes:
+    for conn in route.route:
+      if not conn:
+        continue
+      for end in (conn[0], conn[-1]):
+        if end not in seen:
+          seen.add(end)
+          od.append(end)
 
-    rail_coords: dict = {}
-    if city is not None:
-        station_xyz = {}
-        for line, info in _LINES.items():
-            for name, la, lo in info["stations"]:
-                station_xyz[(line, name)] = (la, lo)
-        for pair in rail_stations_for(city):
-            if pair in station_xyz and pair not in seen:
-                seen.add(pair)
-                od.append(pair)
-                rail_coords[pair] = station_xyz[pair]
+  rail_coords: dict = {}
 
-    if not od:
-        return INVALID_NETWORK_COST #, {"n_od": 0, "reach": 0.0}
+  if not od:
+    return INVALID_NETWORK_COST
 
-    T, M = rl.cost_matrix(network, graph_of_stops, rail, od, theta=theta,
-                          jeep_transfer_m=jeep_transfer_m,
-                          rail_transfer_m=rail_transfer_m)
+  T, M = rl.cost_matrix(
+    network,
+    graph_of_stops,
+    rail,
+    od,
+    theta=theta,
+    jeep_transfer_m=jeep_transfer_m,
+    rail_transfer_m=rail_transfer_m,
+  )
 
-    C = origin_population(graph_of_stops, od, population_gdf, catchment_m,
-                          rail_coords=rail_coords)
-    c = np.array([C[n] for n in od], dtype=float)
+  C = origin_population(
+    graph_of_stops, od, population_gdf, catchment_m, rail_coords=rail_coords, city=city
+  )
+  c = np.array([C[n] for n in od], dtype=float)
 
-    if c.sum() <= 0:
-        return INVALID_NETWORK_COST #, {"n_od": len(od), "reach": 0.0}
+  if c.sum() <= 0:
+    return INVALID_NETWORK_COST
 
-    reachable = np.isfinite(T)
+  reachable = np.isfinite(T)
 
-    if not reachable.any():
-        return INVALID_NETWORK_COST #, {"n_od": len(od), "reach": 0.0,
-                                    #   "mean_min": float("nan"),
-                                    #   "mean_changes": float("nan"),
-                                    #   "pop_total": float(c.sum()),
-                                    #   "penalty_min": float("nan")}
+  if not reachable.any():
+    return float(c.sum()) * len(od) * (city_pair_ceiling_min(graph_of_stops) + theta)
 
-    # T excludes theta (route_layer subtracts it per path), so the generalised cost the objective sums is T + theta*M.
-    generalised = T + theta * M
-    finite_gen = generalised[reachable]
+  # T excludes theta (route_layer subtracts it per path), so the generalised cost the objective sums is T + theta*M.
+  generalised = T + theta * M
+  finite_gen = generalised[reachable]
 
-    penalty = float(finite_gen.max()) + theta
-    cost = np.where(reachable, generalised, penalty)
+  penalty = float(finite_gen.max()) + theta
+  cost = np.where(reachable, generalised, penalty)
 
-    z = float((c[:, None] * cost).sum())
+  return float((c[:, None] * cost).sum())
 
-    # details = {
-    #     "n_od": len(od),
-    #     "n_jeep_od": n_jeep_od,
-    #     "n_rail_od": len(od) - n_jeep_od,
-    #     "reach": float(reachable.mean()),
-    #     "n_unreachable": int((~reachable).sum()),
-    #     "mean_min": float(T[reachable].mean()),
-    #     "mean_changes": float(M[reachable].mean()),
-    #     "mean_generalised_min": float(finite_gen.mean()),
-    #     "pop_total": float(c.sum()),
-    #     "pop_rail": float(c[n_jeep_od:].sum()),
-    #     "penalty_min": penalty,
-    # }
-    return z
+def city_pair_ceiling_min(
+  graph_of_stops: nx.MultiDiGraph, walk_speed_m_per_min: float = 70.0
+) -> float:
+  """Worst-case O-D travel time (minutes): walking across the city's bounding box."""
+  xs = [d["x"] for _, d in graph_of_stops.nodes(data=True)]
+  ys = [d["y"] for _, d in graph_of_stops.nodes(data=True)]
+  # If x/y are projected meters; use haversine if lat/lon
+  diag_m = ((max(xs) - min(xs)) ** 2 + (max(ys) - min(ys)) ** 2) ** 0.5
+  return diag_m / walk_speed_m_per_min
 
-
-def eda_fitness_user_cost(network, graph_of_stops, population_gdf,
-                      catchment_m: float = CATCHMENT_RADIUS_M,
-                      theta: float = TRANSFER_PENALTY_MIN,
-                      rail_graph=None,
-                      city: str | None = None,
-                      jeep_transfer_m: float = JEEP_TRANSFER_MAX_M,
-                      rail_transfer_m: float = RAIL_TRANSFER_MAX_M,
-                      return_details: bool = False,
-                    ):
-    # Every exit goes through out(). By default it hands back the objective on
-    # its own, which is what fitness_score appends and what NSGA ranks, so the
-    # GA path is unchanged. return_details=True adds the diagnostics dict, and
-    # is what the EDA baseline asks for -- before this, the success path
-    # returned a bare float while one failure path returned a 2-tuple, so a
-    # caller that unpacked the result worked only when the network was broken.
+def eda_fitness_user_cost(
+    network: Network,
+    graph_of_stops: nx.MultiDiGraph,
+    population_gdf,
+    catchment_m: float = CATCHMENT_RADIUS_M,
+    theta: float = TRANSFER_PENALTY_MIN,
+    rail_graph=None,
+    city: str | None = None,
+    jeep_transfer_m: float = JEEP_TRANSFER_MAX_M,
+    rail_transfer_m: float = RAIL_TRANSFER_MAX_M,
+    return_details: bool = False,
+):
     def out(cost, **details):
         return (cost, details) if return_details else cost
 
@@ -305,12 +349,19 @@ def eda_fitness_user_cost(network, graph_of_stops, population_gdf,
     if not od:
         return out(INVALID_NETWORK_COST, n_od=0, reach=0.0)
 
-    T, M = rl.cost_matrix(network, graph_of_stops, rail, od, theta=theta,
-                          jeep_transfer_m=jeep_transfer_m,
-                          rail_transfer_m=rail_transfer_m)
+    T, M = rl.cost_matrix(
+        network,
+        graph_of_stops,
+        rail,
+        od,
+        theta=theta,
+        jeep_transfer_m=jeep_transfer_m,
+        rail_transfer_m=rail_transfer_m,
+    )
 
-    C = origin_population(graph_of_stops, od, population_gdf, catchment_m,
-                          rail_coords=rail_coords)
+    C = origin_population(
+        graph_of_stops, od, population_gdf, catchment_m, rail_coords=rail_coords, city=city
+    )
     c = np.array([C[n] for n in od], dtype=float)
 
     if c.sum() <= 0:
@@ -319,10 +370,13 @@ def eda_fitness_user_cost(network, graph_of_stops, population_gdf,
     reachable = np.isfinite(T)
 
     if not reachable.any():
-        return out(INVALID_NETWORK_COST, n_od=len(od), reach=0.0,
-                   pop_total=float(c.sum()))
+        return out(
+            INVALID_NETWORK_COST,
+            n_od=len(od),
+            reach=0.0,
+            pop_total=float(c.sum()),
+        )
 
-    # T excludes theta (route_layer subtracts it per path), so the generalised cost the objective sums is T + theta*M.
     generalised = T + theta * M
     finite_gen = generalised[reachable]
 
@@ -346,474 +400,278 @@ def eda_fitness_user_cost(network, graph_of_stops, population_gdf,
         penalty_min=penalty,
     )
 
-# map stop size by number of degrees, return size of stop based on its stop class
-def get_stop_area(network, stop, stop_sizes, max_degree):
-    degree = network.degree(stop)
-    for stop_class in range(3):
-        upper = max_degree[stop_class]
-        if degree <= upper:
-            return stop_sizes[stop_class]
-    return stop_sizes[2]
-
 def compute_internal_connectivity(
-    network: Network,
-    target_node_ratio=TARGET_NODE_RATIO,
-    min_intersections_per_route=MIN_INTERSECTIONS_PER_ROUTE
-):
-    """
-        n_i = the number of intersection nodes, aka when 2+ routes stop there in the same direction
-        N_i = nodes * target node ratio, decimals truncated and floor set at 1
-        r_i = the number of routes containing intersection nodes >= intersection threshold
-            passed to this function
-        R_i = the number of routes
-        internal connectivity = 0.5 * [MIN(n_i / N_i, 1.0) + (r_i / R_i IF R_i > 0 ELSE 0.0)]
-    """
+  network: Network,
+  route_stops: dict,
+  target_node_ratio: float = TARGET_NODE_RATIO,
+  min_intersections_per_route: int = MIN_INTERSECTIONS_PER_ROUTE,
+) -> float:
+  """
+  n_i = the number of intersection nodes, aka when 2+ routes stop there in the same direction
+  N_i = nodes * target node ratio, decimals truncated and floor set at 1
+  r_i = the number of routes containing intersection nodes >= intersection threshold
+  R_i = the number of routes
+  internal connectivity = 0.5 * [MIN(n_i / N_i, 1.0) + (r_i / R_i IF R_i > 0 ELSE 0.0)]
+  """
+  total_nodes = len(network.graph.nodes())
+  if total_nodes == 0 or not network.routes:
+    return 0.0
 
-    total_nodes = len(network.graph.nodes())
-    if total_nodes == 0:
-        return 0.0 #, {
-        #     "n_i": 0,
-        #     "N_i": 0,
-        #     "r_i": 0,
-        #     "R_i": 0,
-        #     "min_intersections_per_route": min_intersections_per_route,
-        # }
+  by_direction: dict = {}  # direction -> {stop: route_id of first route seen}
+  intersection_nodes: dict = {}  # direction -> {stop}
 
-    if not network.routes:
-        return 0.0 #, {
-        #     "n_i": 0,
-        #     "N_i": max(1, int(total_nodes * target_node_ratio)),
-        #     "r_i": 0,
-        #     "R_i": 0,
-        #     "min_intersections_per_route": min_intersections_per_route,
-        # }
+  for route in network.routes:
+    per_stop = by_direction.get(route.direction)
+    if per_stop is None:
+      per_stop = by_direction[route.direction] = {}
+    interchange = intersection_nodes.get(route.direction)
+    if interchange is None:
+      interchange = intersection_nodes[route.direction] = set()
 
-    routes_by_direction = {}
-    route_stops = {}
+    for stop in route_stops[route.route_id]:
+      first = per_stop.get(stop)
+      if first is None:
+        per_stop[stop] = route.route_id
+      elif first != route.route_id:
+        interchange.add(stop)
 
-    for route in network.routes:
-        stops = set()
-        for connection in route.route:
-            stops.add(connection[0])
-            stops.add(connection[-1])
-        route_stops[route.route_id] = stops
+  n_i = len({stop for stops in intersection_nodes.values() for stop in stops})
+  N_i = max(1, int(total_nodes * target_node_ratio))
+  r_i = 0
 
-        per_stop = routes_by_direction.setdefault(route.direction, {})
-        for stop in stops:
-            per_stop.setdefault(stop, set()).add(route.route_id)
+  for route in network.routes:
+    interchange = intersection_nodes.get(route.direction)
+    if (
+      interchange
+      and len(route_stops[route.route_id] & interchange) >= min_intersections_per_route
+    ):
+      r_i += 1
 
-    intersection_nodes = set()
-    for per_stop in routes_by_direction.values():
-        for stop, route_ids in per_stop.items():
-            if len(route_ids) >= 2:
-                intersection_nodes.add(stop)
+  R_i = len(network.routes)
+  return 0.5 * (min(n_i / N_i, 1.0) + (r_i / R_i if R_i > 0 else 0.0))
 
-    n_i = len(intersection_nodes)
-    N_i = max(1, int(total_nodes * target_node_ratio))
-    r_i = 0
-
-    for route in network.routes:
-        per_stop = routes_by_direction[route.direction]
-        interchange_stops = {
-            stop for stop in route_stops[route.route_id]
-            if len(per_stop.get(stop, ())) >= 2
-        }
-        if len(interchange_stops) >= min_intersections_per_route:
-            r_i += 1
-
-    R_i = len(network.routes)
-
-    internal_connectivity = 0.5 * (
-        min(n_i / N_i, 1.0) +
-        (r_i / R_i if R_i > 0 else 0.0)
-    )
-
-    # details = {
-    #     "total_nodes": total_nodes,
-    #     "n_i": n_i,
-    #     "N_i": N_i,
-    #     "r_i": r_i,
-    #     "R_i": R_i,
-    #     "min_intersections_per_route": min_intersections_per_route,
-    # }
-
-    return internal_connectivity #, details
 
 def compute_external_connectivity(
-    network,
-    total_potential_transport_nodes,
-    min_transpo_stops_per_route=MIN_TRANSPO_STOPS_PER_ROUTE
-):
-    total_nodes = len(network.graph.nodes())
-    if total_nodes == 0:
-        return 0.0 #, {
-        #     "total_nodes": 0,
-        #     "n_e": 0,
-        #     "N_e": max(1, total_potential_transport_nodes),
-        #     "r_e": 0,
-        #     "R_e": 0,
-        #     "min_transpo_stops_per_route": min_transpo_stops_per_route,
-        # }
+  network: Network,
+  total_potential_transport_nodes: int,
+  route_stops: dict,
+  min_transpo_stops_per_route: int = MIN_TRANSPO_STOPS_PER_ROUTE,
+) -> float:
+  total_nodes = len(network.graph.nodes())
+  if total_nodes == 0:
+    return 0.0
 
-    # route_family_stops = get_route_family_stop_map(network)
-    # total_route_families = len(route_family_stops)
+  total_routes = len(route_stops)
 
-    stop_list = {}
-    for u, v, route in network.graph.edges(keys=True):
-        if route not in stop_list:
-            stop_list[route] = set()
+  if total_routes == 0:
+    return 0.0
 
-        stop_list[route].add(u)
-        stop_list[route].add(v)
+  transpo_nodes = {
+    node
+    for node, node_data in network.graph.nodes(data=True)
+    if node_data.get("isTranspo", False)
+  }
 
-    total_routes = len(stop_list)
+  n_e = len(transpo_nodes)
+  N_e = max(1, total_potential_transport_nodes)
 
-    transpo_nodes = {
-        node for node, node_data in network.graph.nodes(data=True)
-        if node_data.get("isTranspo", False)
-    }
+  r_e = sum(
+    1
+    for stops in route_stops.values()
+    if len(stops & transpo_nodes) >= min_transpo_stops_per_route
+  )
 
-    n_e = len(transpo_nodes)
-    N_e = max(1, total_potential_transport_nodes)
+  return 0.5 * (min(n_e / N_e, 1.0) + (r_e / total_routes))
 
-    if total_routes == 0:
-        return 0.0 #, {
-        #     "total_nodes": total_nodes,
-        #     "n_e": n_e,
-        #     "N_e": N_e,
-        #     "r_e": 0,
-        #     "R_e": 0,
-        #     "min_transpo_stops_per_route": min_transpo_stops_per_route,
-        # }
+def compute_vulnerability(
+  network_graph: nx.MultiDiGraph,
+  adjacency: csr_matrix | None = None,
+) -> tuple[float, float]:
+  nodes = list(network_graph.adj)
+  N = len(nodes)
+  if N == 0:
+    return 0.0, 0.0
 
-    r_e = 0
-    for stops in stop_list.values():
-        transpo_count = sum(1 for stop in stops if stop in transpo_nodes)
-        if transpo_count >= min_transpo_stops_per_route:
-            r_e += 1
+  index = {node: i for i, node in enumerate(nodes)}
+  rows: list[int] = []
+  cols: list[int] = []
+  counts: list[int] = []
+  for node, successors in network_graph.adj.items():
+    i = index[node]
+    for successor, keys in successors.items():
+      rows.append(i)
+      cols.append(index[successor])
+      counts.append(len(keys))
 
-    R_e = total_routes
+  out_counts = csr_matrix(
+    (np.array(counts, dtype=np.int64), (rows, cols)), shape=(N, N)
+  )
+  in_counts = out_counts.T.tocsr()
+  if adjacency is None:
+    adjacency = (out_counts + in_counts) != 0
 
-    external_connectivity = 0.5 * (
-        min(n_e / N_e, 1.0) +
-        (r_e / R_e if R_e > 0 else 0.0)
+  degree = (
+    np.asarray(out_counts.sum(axis=1)).ravel()
+    + np.asarray(in_counts.sum(axis=1)).ravel()
+  ).astype(np.int64)
+
+  num_removals = max(1, int(N * 0.1))
+  alive = np.ones(N, dtype=bool)
+  s_values = []
+
+  for _ in range(num_removals):
+    max_node = int(np.where(alive, degree, -1).argmax())
+    alive[max_node] = False
+
+    lo = out_counts.indptr[max_node]
+    hi = out_counts.indptr[max_node + 1]
+    degree[out_counts.indices[lo:hi]] -= out_counts.data[lo:hi]
+
+    lo = in_counts.indptr[max_node]
+    hi = in_counts.indptr[max_node + 1]
+    degree[in_counts.indices[lo:hi]] -= in_counts.data[lo:hi]
+
+    keep = np.flatnonzero(alive)
+    if keep.size == 0:
+      break
+    _n_components, labels = connected_components(
+      adjacency[keep][:, keep], directed=False
     )
+    s_values.append(int(np.bincount(labels).max()) / N)
 
-    # details = {
-    #     "total_nodes": total_nodes,
-    #     "n_e": n_e,
-    #     "N_e": N_e,
-    #     "r_e": r_e,
-    #     "R_e": R_e,
-    #     "min_transpo_stops_per_route": min_transpo_stops_per_route,
-    # }
+  q_c = num_removals / N
+  R_prime = sum(s_values) / N
+  return R_prime, q_c
 
-    return external_connectivity #, details
+def compute_robustness(network_graph: nx.MultiDiGraph, adjacency: csr_matrix) -> tuple[float, float]:
+  nodes = list(network_graph.adj)
+  N = len(nodes)
+  if N == 0:
+    return 0.0, 0.0
 
-def compute_vulnerability(network_graph):
-    G = network_graph.copy()
-    N = len(G.nodes())
-    if N == 0:
-        return 0.0, 0.0
+  num_removals = max(1, int(N * 0.1))
+  alive = np.ones(N, dtype=bool)
+  s_values = []
 
-    num_removals = max(1, int(N * 0.1))
-    s_values = []
+  for selected_node in random.sample(range(N), num_removals):
+    alive[selected_node] = False
 
-    for k in range(1, num_removals + 1):
-        if len(G.nodes()) == 0:
-            break
+    keep = np.flatnonzero(alive)
+    if keep.size == 0:
+      break
+    _n_components, labels = connected_components(
+      adjacency[keep][:, keep], directed=False
+    )
+    s_values.append(int(np.bincount(labels).max()) / N)
 
-        deg_view = G.degree()
-        max_node, _ = max_degree_node_first(deg_view)
-        G.remove_node(max_node)
-
-        lwcc_size = largest_weakly_connected_component_size(G)
-        s_q = lwcc_size / N
-        s_values.append(s_q)
-
-    q_c = num_removals / N
-    R_prime = sum(s_values) / N
-    return R_prime, q_c
-
-def compute_robustness(network_graph):
-    G = network_graph.copy()
-    N = len(G.nodes())
-    if N == 0:
-        return 0.0, 0.0
-
-    num_removals = max(1, int(N * 0.1))
-    s_values = []
-
-    for k in range(1, num_removals + 1):
-        if len(G.nodes()) == 0:
-            break
-
-        selected_node = random.choice(list(G.nodes()))
-        G.remove_node(selected_node)
-
-        lwcc_size = largest_weakly_connected_component_size(G)
-        s_q = lwcc_size / N
-        s_values.append(s_q)
-
-    q_c = num_removals / N
-    R_prime = sum(s_values) / N
-    return R_prime, q_c
+  q_c = num_removals / N
+  R_prime = sum(s_values) / N
+  return R_prime, q_c
 
 # Red(R) = sum of L(a) for a in A_multi / sum of L(a) for a in A_serviced
-# NOTE: test if working
-def compute_redundancy(network: Network, edge_len) -> float:
-    arcs = {} # length
-    routes_on = {} # route ids
+def compute_redundancy(
+    edge_len: dict[frozenset, float],
+    arcs: dict[tuple, set],
+) -> float:
+    serviced = 0.0
+    multi = 0.0
+    for arc, routes in arcs.items():
+        length = edge_len.get(frozenset(arc))
+        if length is None:
+            continue
+        serviced += length
+        if len(routes) >= 2:
+            multi += length
 
-    for (_, _, key, data) in network.graph.edges(keys=True, data=True):
-        prev = None
-        for stop in data['road_path']:
-            if prev is None:
-                prev = stop
-                continue
-            arc = (prev, stop)
-            length = edge_len.get(arc)
-            if length is not None:
-                arcs[arc] = length
-                routes_on.setdefault(arc, set()).add(key)
-            prev = stop
+    return 0.0 if serviced <= 0 else multi / serviced
 
-    serviced = sum(arcs.values())
-    if serviced <= 0:
+def get_network_coverage(
+    total_network_distance: float,
+    allowed_edge: dict[frozenset, bool],
+    edge_len: dict[frozenset, float],
+    arcs: dict[tuple, set],
+) -> float:
+    if total_network_distance == 0:
         return 0.0
-    multi = sum(length for arc, length in arcs.items() if len(routes_on[arc]) >= 2)
-    return multi / serviced
 
-# NOTE: check if types are correct
-def get_network_coverage(network_graph, total_network_distance: int, allowed_edge: dict[tuple[int, int], bool], edge_len:  dict[tuple[int, int], float]):
-    # This will contain all the edges travelled
+    serviced: set[frozenset] = set()
+    covered = 0.0
+    for arc in arcs:
+        segment = frozenset(arc)
+        if segment in serviced:
+            continue
+        if not allowed_edge.get(segment, False):
+            continue
+        serviced.add(segment)
+        covered += edge_len.get(segment, 0.0)
 
-    if (total_network_distance == 0):
-            return 0.0
+    return covered / total_network_distance
 
-    serviced = {}
-    for _, _, edge_data in network_graph.edges(data=True):
-        prev_stop = None
-        for stop in edge_data['road_path']:
-            if prev_stop is None:
-                prev_stop = stop
-                continue
 
-            segment = frozenset((prev_stop, stop))
-            if segment not in serviced and segment in allowed_edge:
-                serviced[segment] = edge_len.get(segment, 0.0)
-
-            prev_stop = stop
-
-    return sum(serviced.values()) / total_network_distance
-    # edge_seen = set()
-    # path_seen = set()
-    # travelled_distance = 0
-    # for node1, node2, edge_data in network_graph.edges(data=True):
-    #     if (node1, node2) not in edge_seen and (node2, node1) not in edge_seen:
-    #         edge_seen.add((node1, node2))
-    #         edge_seen.add((node2, node1))
-    #         path_travelled = edge_data['road_path']
-    #
-    #         prev_stop = None
-    #         for stop in path_travelled:
-    #             if prev_stop == None:
-    #                 prev_stop = stop
-    #                 continue
-    #
-    #             if (prev_stop, stop) not in path_seen:
-    #                 if allowed_edge.get((prev_stop, stop), False):
-    #                     travelled_distance += edge_len[(prev_stop, stop)]
-    #                 path_seen.add((prev_stop, stop))
-    #
-    #             prev_stop = stop
-    #
-    # print(travelled_distance, '/', total_network_distance, '=', travelled_distance / total_network_distance)
-    # return travelled_distance / total_network_distance
-
-def largest_weakly_connected_component_size(G):
-    if len(G) == 0:
-        return 0
-    return len(max(nx.weakly_connected_components(G), key=len))
-
-# This function will return the node with the maximum degree and its degree from a DegreeView object
-def max_degree_node_first(deg_view):
-    max_d = -1
-    max_n = None
-    for n, d in deg_view:
-        if d > max_d:
-            max_d = d
-            max_n = n
-    return max_n, max_d
-
-def normalize_vul_rob(vul_rob, q_c):
+def normalize_vul_rob(vul_rob: float, q_c: float) -> float:
     # With fixed q_c = 10% removals, max possible R' is q_c
     # because R' = (1/N) * sum s(q), and each s(q) <= 1.
     return 0.0 if q_c <= 0 else vul_rob / q_c
 
-_RAIL_CACHE: dict = {}
-
 
 def get_rail_graph():
-    """Build and cache the static rail trunk graph."""
+    """Build and cache the static rail trunk graph (thread-safe)."""
     if "rail" not in _RAIL_CACHE:
-        from utils.route_layer import build_rail_graph
-        _RAIL_CACHE["rail"] = build_rail_graph()
+        with _CACHE_LOCK:
+            if "rail" not in _RAIL_CACHE:
+                from utils.route_layer import build_rail_graph
+                _RAIL_CACHE["rail"] = build_rail_graph()
     return _RAIL_CACHE["rail"]
 
+_POP_CACHE: dict = {}
 
-def origin_population(graph_of_stops, route_nodes, population_gdf,
-                      catchment_m: float,
-                      rail_coords: dict | None = None) -> dict:
-    # C_o: population within ``catchment_m`` of each origin.
-    # Uses a bounding-box reject followed by a haversine test
+def origin_population(
+  graph_of_stops: nx.MultiDiGraph,
+  route_nodes,
+  population_gdf,
+  catchment_m: float,
+  rail_coords: dict | None = None,
+  city: str | None = None,
+) -> dict:
+  cached = _POP_CACHE.get(city)
+  if cached is None or cached[0] is not population_gdf:
     lon = population_gdf["longitude"].to_numpy()
     lat = population_gdf["latitude"].to_numpy()
     pop = population_gdf["phl_general_2020"].to_numpy()
-
-    # degrees per metre, scaled for latitude (1deg = ~111,320m)
-    dlat = catchment_m / 111_320.0
     coslat = np.cos(np.radians(np.mean(lat)))
-    dlon = catchment_m / (111_320.0 * max(coslat, 1e-6))
+    tree = cKDTree(np.column_stack((lon * 111_320.0 * coslat, lat * 111_320.0)))
+    cached = (population_gdf, pop, coslat, tree)
+    _POP_CACHE[city] = cached
 
-    rail_coords = rail_coords or {}
-    C = {}
-    for n in route_nodes:
-        if n in rail_coords:
-            y, x = rail_coords[n]
-        else:
-            d = graph_of_stops.nodes.get(n)
-            if d is None:
-                C[n] = 0.0
-                continue
-            y, x = d.get("y", d.get("lat")), d.get("x", d.get("lon"))
-        if y is None or x is None:
-            C[n] = 0.0
-            continue
-        box = (
-            (lon >= x - dlon) & (lon <= x + dlon)
-            & (lat >= y - dlat) & (lat <= y + dlat)
-        )
-        if not box.any():
-            C[n] = 0.0
-            continue
-        dx = (lon[box] - x) * 111_320.0 * coslat
-        dy = (lat[box] - y) * 111_320.0
-        inside = (dx * dx + dy * dy) <= catchment_m * catchment_m
-        C[n] = float(pop[box][inside].sum())
-    return C
+  _cached_gdf, pop, coslat, tree = cached
+  rail_coords = rail_coords or {}
+  C = {}
+  for n in route_nodes:
+    if n in rail_coords:
+      y, x = rail_coords[n]
+    else:
+      d = graph_of_stops.nodes.get(n)
+      if d is None:
+        C[n] = 0.0
+        continue
+      y, x = d.get("y", d.get("lat")), d.get("x", d.get("lon"))
+    if y is None or x is None:
+      C[n] = 0.0
+      continue
 
-def _fitness_score(network, weights, total_potential_transport_nodes, total_network_distance, allowed_edge, edge_len):
-    internal_connectivity, internal_details = compute_internal_connectivity(
-        network,
-        target_node_ratio=TARGET_NODE_RATIO,
-        min_intersections_per_route=MIN_INTERSECTIONS_PER_ROUTE
-    )
+    idx = tree.query_ball_point((x * 111_320.0 * coslat, y * 111_320.0), catchment_m)
+    C[n] = float(pop[idx].sum()) if idx else 0.0
+  return C
 
-    external_connectivity, external_details = compute_external_connectivity(
-        network,
-        total_potential_transport_nodes=total_potential_transport_nodes,
-        min_transpo_stops_per_route=MIN_TRANSPO_STOPS_PER_ROUTE
-    )
-
-    weighted_internal_connectivity = weights["w_int"] * internal_connectivity
-    weighted_external_connectivity = weights["w_ext"] * external_connectivity
-
-    network_coverage = get_network_coverage(network.graph, total_network_distance, allowed_edge, edge_len)
-    weighted_network_coverage = weights["w_cov"] * network_coverage
-
-    vul, q_c_vul = compute_vulnerability(network.graph)
-    vulnerability = normalize_vul_rob(vul, q_c_vul)
-    weighted_vulnerability = weights["w_vul"] * vulnerability
-
-    rob, q_c_rob = compute_robustness(network.graph)
-    robustness = normalize_vul_rob(rob, q_c_rob)
-    weighted_robustness = weights["w_rob"] * robustness
-
-    data = {
-        "Coverage": weighted_network_coverage,
-        "Internal Connectivity": weighted_internal_connectivity,
-        "External Connectivity": weighted_external_connectivity,
-        "Vulnerability": weighted_vulnerability,
-        "Robustness": weighted_robustness,
-
-        "Coverage Raw": network_coverage,
-        "Internal Connectivity Raw": internal_connectivity,
-        "External Connectivity Raw": external_connectivity,
-        "Vulnerability Raw": vulnerability,
-        "Robustness Raw": robustness,
-
-        "Total Network Nodes": len(network.graph.nodes()),
-        "Total Potential Transport Nodes": total_potential_transport_nodes,
-
-        "n_i": internal_details["n_i"],
-        "N_i": internal_details["N_i"],
-        "r_i": internal_details["r_i"],
-        "R_i": internal_details["R_i"],
-        "Min Intersections Per Route": internal_details["min_intersections_per_route"],
-
-        "n_e": external_details["n_e"],
-        "N_e": external_details["N_e"],
-        "r_e": external_details["r_e"],
-        "R_e": external_details["R_e"],
-        "Min Transpo Stops Per Route": external_details["min_transpo_stops_per_route"],
-
-        "Target Node Ratio": TARGET_NODE_RATIO,
-
-        "q_c Vulnerability": q_c_vul,
-        "q_c Robustness": q_c_rob,
-    }
-
-    total_weight = (
-        weights["w_cov"]
-        + weights["w_int"]
-        + weights["w_ext"]
-        + weights["w_vul"]
-        + weights["w_rob"]
-    )
-
-    weighted_sum = (
-        weighted_network_coverage
-        + weighted_internal_connectivity
-        + weighted_external_connectivity
-        + weighted_vulnerability
-        + weighted_robustness
-    )
-
-    fitness_score = 0.0 if total_weight <= 0 else weighted_sum / total_weight
-
-    return fitness_score, data
-
-# def get_route_family_stop_map(network):
-#     """
-#     Returns:
-#         dict[route_family] = set of stop nodes touched by that route family
-#     Counts A/B as one route family.
-#     """
-#     route_family_stops = {}
-
-#     for u, v, key in network.edges(keys=True):
-#         if not (isinstance(key, str) and '-' in key):
-#             continue
-
-#         route_family = key.split('-')[0]
-#         if route_family not in route_family_stops:
-#             route_family_stops[route_family] = set()
-
-#         route_family_stops[route_family].add(u)
-#         route_family_stops[route_family].add(v)
-
-#     return route_family_stops
-
-
-def _pct_tag(w):
+def _pct_tag(w: float) -> str:
     """
     Convert weight (0.6) -> '60', (0.02) -> '02', (1.0) -> '100'
     Assumes weights are in [0,1].
     """
-    return f"{round(w * 100):02d}"  # 0.1->10, 0.05->05
+    return f"{round(w * 100):02d}"
 
-def make_run_tag(weights):
+
+def make_run_tag(weights: dict[str, float]) -> str:
     return (
         f"cov{_pct_tag(weights['w_cov'])}"
         f"_int{_pct_tag(weights['w_int'])}"

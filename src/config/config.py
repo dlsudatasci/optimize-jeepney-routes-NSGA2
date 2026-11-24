@@ -13,9 +13,10 @@ MIN_TRANSPO_STOPS_PER_ROUTE = 2   # n for r_e
 
 # CapEx
 STOP_COST = 28000
-STOP_SIZES = [27.0, 40.5, 54.0]
-MAX_DEGREE = [3, 5, 999999]
-MAX_BUDGET = 200000000 # placeholder, modify based on city
+STOP_SIZES = (27.0, 40.5, 54.0)
+MAX_DEGREE = (3, 5, 999999)
+
+MAX_BUDGET = 500_000_000 # placeholder, modify based on city
 
 # Z_user
 #
@@ -35,7 +36,6 @@ JEEP_TRANSFER_MAX_M = 250.0
 RAIL_TRANSFER_MAX_M = 500.0
 TRANSFER_PENALTY_MIN = 5.0     # minutes of perceived cost per mode/line change
 CATCHMENT_RADIUS_M = 500.0     # radius of a stop's population catchment
-
 # Returned when a network cannot be scored (no routes, no OD set, no population
 # in any catchment, or nothing reachable). Finite, and small enough not to
 # destroy the objective vector if it is ever normalised: Makati measures ~6e9,
