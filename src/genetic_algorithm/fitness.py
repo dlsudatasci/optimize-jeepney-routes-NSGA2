@@ -7,7 +7,7 @@ import networkx as nx
 import numpy as np
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components
-from scipy.spatial import cKDTree
+from scipy.spatial import cKDTree  # pyright: ignore[reportAttributeAccessIssue]
 
 from config.config import (
     CATCHMENT_RADIUS_M,
@@ -25,20 +25,21 @@ from utils import route_layer as rl
 from utils.rail_layer import LINES as _LINES
 from utils.rail_layer import rail_stations_for
 
-_CITY_CACHE: dict[str, tuple[dict[frozenset, bool], dict[frozenset, float], float, int]] = {}
-_RAIL_CACHE: dict[str, object] = {}
+_CITY_CACHE: dict[tuple[str, int], tuple[dict[frozenset, bool], dict, float, int]] = {}
+_RAIL_CACHE: dict[str, nx.Graph] = {}
 _CACHE_LOCK = threading.Lock()
 
 def _get_city_stats(city_name: str, graph_of_stops: nx.MultiDiGraph):
-    if city_name in _CITY_CACHE:
-        return _CITY_CACHE[city_name]
+    key = (city_name, id(graph_of_stops))
+    if key in _CITY_CACHE:
+        return _CITY_CACHE[key]
 
     with _CACHE_LOCK:
-        if city_name in _CITY_CACHE:
-            return _CITY_CACHE[city_name]
+        if key in _CITY_CACHE:
+            return _CITY_CACHE[key]
 
         allowed_edge: dict[frozenset, bool] = {}
-        edge_len: dict[frozenset, float] = {}
+        edge_len: dict = {}
         total_network_distance = 0.0
 
         for u, v, _, data in graph_of_stops.edges(keys=True, data=True):
@@ -52,22 +53,28 @@ def _get_city_stats(city_name: str, graph_of_stops: nx.MultiDiGraph):
             )
 
             length = data.get("length", 0.0)
-            allowed_edge[(u, v)] = allowed
-            allowed_edge[(v, u)] = allowed
+            segment = frozenset((u, v))
+            if segment not in allowed_edge:
+                allowed_edge[segment] = allowed
+                edge_len[segment] = length
+                if allowed:
+                    total_network_distance += length
+            elif allowed and not allowed_edge[segment]:
+                allowed_edge[segment] = True
+                total_network_distance += length
+
             edge_len[(u, v)] = length
             edge_len[(v, u)] = length
-            if allowed:
-                total_network_distance += length
 
         n_transport_nodes = sum(1 for _, d in graph_of_stops.nodes(data=True) if d.get("isTranspo"))
 
-        _CITY_CACHE[city_name] = (
+        _CITY_CACHE[key] = (
             allowed_edge,
             edge_len,
             total_network_distance,
             n_transport_nodes,
         )
-        return _CITY_CACHE[city_name]
+        return _CITY_CACHE[key]
 
 
 def fitness_score(
@@ -255,11 +262,21 @@ def fitness_user_cost(
           od.append(end)
 
   rail_coords: dict = {}
+  if city is not None:
+    station_xyz = {}
+    for line, info in _LINES.items():
+      for name, la, lo in info["stations"]:
+        station_xyz[(line, name)] = (la, lo)
+    for pair in rail_stations_for(city):
+      if pair in station_xyz and pair not in seen:
+        seen.add(pair)
+        od.append(pair)
+        rail_coords[pair] = station_xyz[pair]
 
   if not od:
     return INVALID_NETWORK_COST
 
-  T, M = rl.cost_matrix(
+  out = rl.cost_matrix(
     network,
     graph_of_stops,
     rail,
@@ -268,6 +285,7 @@ def fitness_user_cost(
     jeep_transfer_m=jeep_transfer_m,
     rail_transfer_m=rail_transfer_m,
   )
+  T, M = out[0], out[1]
 
   C = origin_population(
     graph_of_stops, od, population_gdf, catchment_m, rail_coords=rail_coords, city=city
@@ -280,7 +298,7 @@ def fitness_user_cost(
   reachable = np.isfinite(T)
 
   if not reachable.any():
-    return float(c.sum()) * len(od) * (city_pair_ceiling_min(graph_of_stops) + theta)
+    return INVALID_NETWORK_COST
 
   # T excludes theta (route_layer subtracts it per path), so the generalised cost the objective sums is T + theta*M.
   generalised = T + theta * M
@@ -290,16 +308,6 @@ def fitness_user_cost(
   cost = np.where(reachable, generalised, penalty)
 
   return float((c[:, None] * cost).sum())
-
-def city_pair_ceiling_min(
-  graph_of_stops: nx.MultiDiGraph, walk_speed_m_per_min: float = 70.0
-) -> float:
-  """Worst-case O-D travel time (minutes): walking across the city's bounding box."""
-  xs = [d["x"] for _, d in graph_of_stops.nodes(data=True)]
-  ys = [d["y"] for _, d in graph_of_stops.nodes(data=True)]
-  # If x/y are projected meters; use haversine if lat/lon
-  diag_m = ((max(xs) - min(xs)) ** 2 + (max(ys) - min(ys)) ** 2) ** 0.5
-  return diag_m / walk_speed_m_per_min
 
 def eda_fitness_user_cost(
     network: Network,
@@ -349,7 +357,7 @@ def eda_fitness_user_cost(
     if not od:
         return out(INVALID_NETWORK_COST, n_od=0, reach=0.0)
 
-    T, M = rl.cost_matrix(
+    costs = rl.cost_matrix(
         network,
         graph_of_stops,
         rail,
@@ -358,6 +366,7 @@ def eda_fitness_user_cost(
         jeep_transfer_m=jeep_transfer_m,
         rail_transfer_m=rail_transfer_m,
     )
+    T, M = costs[0], costs[1]
 
     C = origin_population(
         graph_of_stops, od, population_gdf, catchment_m, rail_coords=rail_coords, city=city
@@ -507,8 +516,7 @@ def compute_vulnerability(
     (np.array(counts, dtype=np.int64), (rows, cols)), shape=(N, N)
   )
   in_counts = out_counts.T.tocsr()
-  if adjacency is None:
-    adjacency = (out_counts + in_counts) != 0
+  adjacency_matrix = (out_counts + in_counts) != 0 if adjacency is None else adjacency
 
   degree = (
     np.asarray(out_counts.sum(axis=1)).ravel()
@@ -535,7 +543,7 @@ def compute_vulnerability(
     if keep.size == 0:
       break
     _n_components, labels = connected_components(
-      adjacency[keep][:, keep], directed=False
+      adjacency_matrix[keep][:, keep], directed=False
     )
     s_values.append(int(np.bincount(labels).max()) / N)
 
@@ -543,7 +551,10 @@ def compute_vulnerability(
   R_prime = sum(s_values) / N
   return R_prime, q_c
 
-def compute_robustness(network_graph: nx.MultiDiGraph, adjacency: csr_matrix) -> tuple[float, float]:
+def compute_robustness(
+  network_graph: nx.MultiDiGraph,
+  adjacency: csr_matrix
+) -> tuple[float, float]:
   nodes = list(network_graph.adj)
   N = len(nodes)
   if N == 0:
@@ -614,7 +625,7 @@ def normalize_vul_rob(vul_rob: float, q_c: float) -> float:
     return 0.0 if q_c <= 0 else vul_rob / q_c
 
 
-def get_rail_graph():
+def get_rail_graph() -> nx.Graph:
     """Build and cache the static rail trunk graph (thread-safe)."""
     if "rail" not in _RAIL_CACHE:
         with _CACHE_LOCK:
