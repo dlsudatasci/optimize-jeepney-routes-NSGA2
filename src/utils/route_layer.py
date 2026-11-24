@@ -36,7 +36,7 @@ from config.config import (
 )
 from utils.rail_layer import LINES, RAIL_INTERCHANGES
 
-JEEP_SPEED_KPH = 18.0
+JEEP_SPEED_KPH = 9.0
 EARTH_R = 6371008.8
 
 
