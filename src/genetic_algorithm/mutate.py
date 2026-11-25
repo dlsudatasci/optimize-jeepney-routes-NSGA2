@@ -107,38 +107,42 @@ def remove_stop(route_obj, network: Network, graph_of_stops: nx.MultiDiGraph, wa
   graph = network.graph
   stops = _get_stops(route)
 
-  stop_idx = random.randint(1, len(stops) - 2)
-  u, old_stop, w = stops[stop_idx - 1], stops[stop_idx], stops[stop_idx + 1]
+  # Shuffle all intermediate stop indices and keep trying until one succeeds
+  candidate_indices = list(range(1, len(stops) - 1))
+  random.shuffle(candidate_indices)
 
-  if graph.has_edge(u, w, route_id):
-    return False
+  for stop_idx in candidate_indices:
+    u, old_stop, w = stops[stop_idx - 1], stops[stop_idx], stops[stop_idx + 1]
 
-  edge1 = graph.get_edge_data(u, old_stop, route_id)
-  edge2 = graph.get_edge_data(old_stop, w, route_id)
-  if edge1 is None or edge2 is None:
-    return False
+    if graph.has_edge(u, w, route_id):
+      continue
 
-  shortcut_dist = table.get_distance(u, w)
-  if np.isinf(shortcut_dist):
-    return False
+    edge1 = graph.get_edge_data(u, old_stop, route_id)
+    edge2 = graph.get_edge_data(old_stop, w, route_id)
+    if edge1 is None or edge2 is None:
+      continue
 
-  new_length = route_obj.length - edge1["distance"] - edge2["distance"] + shortcut_dist
+    shortcut_dist = table.get_distance(u, w)
+    if np.isinf(shortcut_dist):
+      continue
 
-  if _min_distance() <= new_length <= MAX_DISTANCE:
-    shortcut_path = table.get_path(u, w)
-    if shortcut_path is None:
-      return False
+    new_length = route_obj.length - edge1["distance"] - edge2["distance"] + shortcut_dist
 
-    graph.remove_edge(u, old_stop, route_id)
-    graph.remove_edge(old_stop, w, route_id)
-    graph.add_edge(u, w, key=route_id, road_path=shortcut_path, distance=shortcut_dist)
+    if _min_distance() <= new_length <= MAX_DISTANCE:
+      shortcut_path = table.get_path(u, w)
+      if shortcut_path is None:
+        continue
 
-    if graph.degree(old_stop) == 0:
-      graph.remove_node(old_stop)
+      graph.remove_edge(u, old_stop, route_id)
+      graph.remove_edge(old_stop, w, route_id)
+      graph.add_edge(u, w, key=route_id, road_path=shortcut_path, distance=shortcut_dist)
 
-    route[stop_idx - 1 : stop_idx + 1] = [shortcut_path]
-    route_obj.length = new_length
-    return True
+      if graph.degree(old_stop) == 0:
+        graph.remove_node(old_stop)
+
+      route[stop_idx - 1 : stop_idx + 1] = [shortcut_path]
+      route_obj.length = new_length
+      return True
 
   return False
 
